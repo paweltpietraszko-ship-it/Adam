@@ -114,7 +114,7 @@ def ask_claude(question: str) -> str:
 
 
 # Klient Gemini inicjalizowany raz na poziomie modulu
-gemini_client = google_genai.Client(api_key=gemini_api_key) if gemini_api_key else None
+gemini_client = google_genai.Client(api_key=os.environ.get("GEMINI_API_KEY")) if os.environ.get("GEMINI_API_KEY") else None
 
 # Loguj stan kluczy przy starcie
 if not os.getenv("OPENAI_API_KEY"):
