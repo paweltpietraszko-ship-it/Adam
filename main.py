@@ -410,15 +410,15 @@ def ask(q: Question, request: Request):
             openai_r = "[OPENAI TIMEOUT]"
             gemini_r = "[GEMINI TIMEOUT]"
 
-            try: claude_r = fc.result(timeout=12)
+            try: claude_r = fc.result(timeout=30)
             except TimeoutError: pass
             logger.info(f"[MODEL] claude={time.time()-t_claude:.1f}s")
 
-            try: openai_r = fo.result(timeout=10)
+            try: openai_r = fo.result(timeout=30)
             except TimeoutError: pass
             logger.info(f"[MODEL] openai={time.time()-t_openai:.1f}s")
 
-            try: gemini_r = fg.result(timeout=10)
+            try: gemini_r = fg.result(timeout=30)
             except TimeoutError: pass
             logger.info(f"[MODEL] gemini={time.time()-t_gemini:.1f}s")
 
