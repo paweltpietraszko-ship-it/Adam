@@ -345,11 +345,10 @@ Pewnosc: {cert}
 Fakty zgodne miedzy modelami: {facts}
 Sprzecznosci miedzy modelami: {contras}
 
-Zasady bezwzgledne:
-- Wolno ci uzywac TYLKO faktow z listy faktow zgodnych.
+Zasady:
+- Jezeli pytanie dotyczy tresci raportu: odpowiedz opierajac sie na faktach zgodnych.
 - Jezeli pytanie dotyczy sprzecznosci: "Tu modele sie roznia — [opisz roznice]."
-- Jezeli pytanie wykracza poza raport: "Tego nie ma w zweryfikowanych zrodlach. Zadaj nowe pytanie do SILNIKA."
-- Nie dodawaj wiedzy zewnetrznej. Nie spekuluj.
+- Jezeli pytanie wykracza POZA raport: odpowiedz na podstawie swojej wiedzy, ale ZAWSZE poprzedz odpowiedz zdaniem: "To wykracza poza zweryfikowany raport — odpowiadam jako Adam na podstawie wiedzy Claude 4, bez weryfikacji przez silnik. Jesli chcesz pewniejszej odpowiedzi, zadaj to pytanie bezposrednio do SILNIKA."
 - Ton: naturalny, rzeczowy, cieplo. Pelne zdania z wyjasnieniem."""
 
     if not isinstance(history, list):
@@ -481,3 +480,31 @@ from fastapi.responses import FileResponse
 @app.get("/")
 def root():
     return FileResponse("index.html")
+
+@app.get("/manifest.json")
+def manifest():
+    return FileResponse("manifest.json", media_type="application/manifest+json")
+
+@app.get("/service-worker.js")
+def service_worker():
+    return FileResponse("service-worker.js", media_type="application/javascript")
+
+@app.get("/apple-touch-icon.png")
+def apple_touch_icon():
+    return FileResponse("apple-touch-icon.png", media_type="image/png")
+
+@app.get("/icon-192.png")
+def icon_192():
+    return FileResponse("icon-192.png", media_type="image/png")
+
+@app.get("/icon-512.png")
+def icon_512():
+    return FileResponse("icon-512.png", media_type="image/png")
+
+@app.get("/icon-maskable.png")
+def icon_maskable():
+    return FileResponse("icon-maskable.png", media_type="image/png")
+
+@app.get("/favicon.ico")
+def favicon():
+    return FileResponse("favicon.ico", media_type="image/x-icon")
