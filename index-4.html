@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Triangulum</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+textarea:focus, input:focus { outline: none; border-color: #2d4a6e !important; }
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-thumb { background: #1e2329; border-radius: 2px; }
+</style>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a0c0f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Triangulum">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+</head>
+<body style="background:#0a0c0f">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const BACKEND = "https://adam-production-89ef.up.railway.app";
+
+function ReportLine({ text }) {
+  if (!text.trim()) return <div style={{ height: 7 }} />;
+  const m = text.match(/^\*\*(.+?)\*\*(.*)$/);
+  if (m) {
+    if (!m[2].trim()) return (
+      <div style={{
+        fontWeight: 600, color: "#5b9bd5", fontSize: 11,
+        letterSpacing: "0.07em", textTransform: "uppercase",
+        margin: "20px 0 7px", paddingBottom: 5,
+        borderBottom: "1px solid #1a1f26"
+      }}>{m[1]}</div>
+    );
+    return (
+      <div style={{ fontSize: 14, lineHeight: 1.8, color: "#b0b8c4" }}>
+        <span style={{ fontWeight: 600, color: "#c8cdd6" }}>{m[1]}</span>{m[2]}
+      </div>
+    );
+  }
+  if (text.startsWith("- ")) return (
+    <div style={{ fontSize: 13, lineHeight: 1.7, color: "#8a96a4", paddingLeft: 16, position: "relative" }}>
+      <span style={{ position: "absolute", left: 0, color: "#2d4a6e" }}>—</span>
+      {text.slice(2)}
+    </div>
+  );
+  return <div style={{ fontSize: 14, lineHeight: 1.8, color: "#b0b8c4" }}>{text}</div>;
+}
+
+const Tag = ({ c, accent }) => (
+  <span style={{
+    fontFamily: "monospace", fontSize: 9, letterSpacing: "0.1em",
+    textTransform: "uppercase", color: accent ? "#5b9bd5" : "#2d4a6e",
+    padding: "3px 7px", border: `1px solid ${accent ? "#2d4a6e" : "#1a2535"}`,
+    borderRadius: 2
+  }}>{c}</span>
+);
+
+function App() {
+  const [q, setQ] = useState("");
+  const [stage, setStage] = useState("idle");
+  const [sources, setSources] = useState(null);
+  const [verificationData, setVerificationData] = useState({});
+  const [report, setReport] = useState("");
+  const [reportUczen, setReportUczen] = useState("");
+  const [showSrc, setShowSrc] = useState(false);
+  const [err, setErr] = useState("");
+  const [timing, setTiming] = useState(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [adamHistory, setAdamHistory] = useState([]);
+  const [adamInput, setAdamInput] = useState("");
+  const [mode, setMode] = useState("ogolny");
+  const modeRef = useRef("ogolny");
+  const [adamLoading, setAdamLoading] = useState(false);
+  const timerRef = useRef(null);
+  const adamEndRef = useRef(null);
+
+  const running = stage === "loading";
+
+  useEffect(() => {
+    if (running) {
+      setElapsed(0);
+      timerRef.current = setInterval(() => setElapsed(e => e + 1), 1000);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [running]);
+
+  useEffect(() => {
+    adamEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [adamHistory]);
+
+  async function run() {
+    if (!q.trim()) { setErr("Wpisz pytanie."); return; }
+    setErr(""); setSources(null); setReport("");
+    setShowSrc(false); setTiming(null);
+    setAdamHistory([]); setAdamInput("");
+    setStage("loading");
+    const t0 = Date.now();
+
+    try {
+      const res = await fetch(`${BACKEND}/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q, mode: modeRef.current })
+      });
+
+      if (!res.ok) throw new Error(`Błąd serwera: ${res.status}`);
+      const data = await res.json();
+
+      if (data.status === "error") throw new Error(data.error || "Nieznany błąd");
+
+      setSources({ a: data.claude || "", b: data.openai || "", c: data.gemini || "" });
+      setVerificationData(data.verification || {});
+      setReport(data.synthesis || "");
+      setReportUczen(data.synthesis_uczen || "");
+      setTiming(((Date.now() - t0) / 1000).toFixed(1));
+      setStage("done");
+    } catch (e) {
+      setErr(e.message);
+      setStage("error");
+    }
+  }
+
+  async function askAdam() {
+    if (!adamInput.trim() || adamLoading) return;
+    const userMsg = adamInput.trim();
+    setAdamInput("");
+    setAdamLoading(true);
+    const newHistory = [...adamHistory, { role: "user", content: userMsg }];
+    setAdamHistory(newHistory);
+
+    try {
+      const res = await fetch(`${BACKEND}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: userMsg, context: report, verification: verificationData, history: adamHistory, mode: mode })
+      });
+      const data = await res.json();
+      setAdamHistory([...newHistory, { role: "assistant", content: data.answer || "[brak odpowiedzi]" }]);
+    } catch (e) {
+      setAdamHistory([...newHistory, { role: "assistant", content: `Błąd połączenia: ${e.message}` }]);
+    }
+    setAdamLoading(false);
+  }
+
+  const mono = "'IBM Plex Mono', monospace";
+  const sans = "'IBM Plex Sans', sans-serif";
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#0a0c0f", color: "#c8cdd6", fontFamily: sans, padding: "28px 18px" }}>
+      <div style={{ maxWidth: 680, margin: "0 auto" }}>
+
+        {/* Header */}
+        <div style={{ marginBottom: 30, borderBottom: "1px solid #1a1f26", paddingBottom: 18 }}>
+          <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.2em", color: "#2d4a6e", textTransform: "uppercase", marginBottom: 4 }}>
+            System Weryfikacji Multi-Model
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 20, fontWeight: 300, color: "#e0e6ee", letterSpacing: "-0.02em" }}>
+              <img src="icon-192.png" style={{ width: 22, height: 22, marginRight: 6, verticalAlign: "middle", borderRadius: 4 }} />Triangulum <span style={{ fontWeight: 600, color: "#5b9bd5" }}>v3.2</span>
+            </span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "#0f1419", padding: 2, borderRadius: 4, border: "1px solid #1a1f26" }}>
+              <button onClick={() => { setMode("ogolny"); modeRef.current = "ogolny"; }} style={{ padding: "2px 8px", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "ogolny" ? "#1e3a5f" : "transparent", color: mode === "ogolny" ? "#5b9bd5" : "#5a6270", cursor: "pointer" }}>OGÓLNY</button>
+              <button onClick={() => { setMode("uczen"); modeRef.current = "uczen"; }} style={{ padding: "2px 8px", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "uczen" ? "#1e3a5f" : "transparent", color: mode === "uczen" ? "#5b9bd5" : "#5a6270", cursor: "pointer" }}>UCZEŃ</button>
+            </div>
+            <span style={{ fontFamily: mono, fontSize: 9, color: "#1e3a5a", letterSpacing: "0.08em" }}>
+              CLAUDE · GPT-4O-MINI · GEMINI · ADAM
+            </span>
+          </div>
+        </div>
+
+        {/* Question */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: "block", fontFamily: mono, fontSize: 9, letterSpacing: "0.16em", color: "#2d4a6e", textTransform: "uppercase", marginBottom: 6 }}>
+            Pytanie
+          </label>
+          <textarea
+            placeholder="Wpisz pytanie do analizy..."
+            value={q} onChange={e => setQ(e.target.value)} rows={3}
+            onKeyDown={e => { if (e.key === "Enter" && e.ctrlKey) run(); }}
+            style={{
+              width: "100%", background: "#0d1015", border: "1px solid #1a1f26",
+              color: "#c8cdd6", fontFamily: sans, fontSize: 15,
+              padding: "12px 14px", borderRadius: 3, resize: "vertical", lineHeight: 1.5
+            }}
+          />
+          <div style={{ fontFamily: mono, fontSize: 9, color: "#1a2535", marginTop: 4, letterSpacing: "0.06em" }}>
+            Ctrl+Enter aby uruchomić
+          </div>
+        </div>
+
+        {/* Button */}
+        <button onClick={run} disabled={running} style={{
+          width: "100%", padding: "14px", borderRadius: 3,
+          cursor: running ? "not-allowed" : "pointer",
+          background: running ? "#0a0f15" : "#0c1a28",
+          border: `1px solid ${running ? "#1a2535" : "#2d4a6e"}`,
+          color: running ? "#1e3a5a" : "#5b9bd5",
+          fontFamily: mono, fontSize: 10, letterSpacing: "0.2em",
+          textTransform: "uppercase", transition: "all 0.15s", marginBottom: 22
+        }}>
+          {running ? "▸ Analizuję..." : "▸ Uruchom analizę"}
+        </button>
+
+        {/* Progress */}
+        {running && (
+          <div style={{
+            background: "#0d1015", border: "1px solid #1a1f26",
+            borderRadius: 3, marginBottom: 16, overflow: "hidden"
+          }}>
+            <div style={{ height: 2, background: "#0a0c0f" }}>
+              <div style={{
+                height: "100%", background: "linear-gradient(90deg, #1e3a5f, #5b9bd5)",
+                borderRadius: 1, width: `${Math.min(95, elapsed * 4)}%`,
+                transition: "width 1s linear"
+              }} />
+            </div>
+            <div style={{
+              padding: "8px 14px", display: "flex",
+              justifyContent: "space-between", alignItems: "center"
+            }}>
+              <div style={{ fontFamily: mono, fontSize: 10, color: "#3a6a8a", letterSpacing: "0.04em" }}>
+                ▸ Odpytuję modele i tworzę raport...
+              </div>
+              <div style={{ fontFamily: mono, fontSize: 10, color: "#2d4a6e" }}>
+                {elapsed}s
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Error */}
+        {err && (
+          <div style={{
+            background: "#150a0a", border: "1px solid #3a1515",
+            color: "#b06060", padding: "11px 14px", borderRadius: 3,
+            fontFamily: mono, fontSize: 11, marginBottom: 18, lineHeight: 1.6
+          }}>
+            ✕ {err}
+            {err.includes("fetch") && (
+              <div style={{ marginTop: 6, color: "#8a4040" }}>
+                Backend nie odpowiada. Sprawdź czy serwer działa: uvicorn main:app --reload
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Report */}
+        {stage === "done" && (report || reportUczen) && (
+          <div>
+            <div style={{
+              background: "#0d1015", border: "1px solid #1a1f26",
+              borderLeft: "2px solid #1e3a5f", borderRadius: 4, padding: "24px 26px"
+            }}>
+              {(mode === "uczen" ? reportUczen : report).split("\n").map((line, i) => <ReportLine key={i} text={line} />)}
+
+              <div style={{
+                display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6,
+                marginTop: 20, paddingTop: 14, borderTop: "1px solid #1a1f26"
+              }}>
+                <Tag c={sources && sources.c && !sources.c.startsWith("[GEMINI") ? "3 modele" : "2 modele"} />
+                  {verificationData && verificationData.certainty && (
+                    <Tag c={
+                      verificationData.certainty === "WYSOKA" ? "✓ zgodne" :
+                      verificationData.certainty === "SREDNIA" ? "⚠ częściowe różnice" :
+                      "✕ modele się różnią"
+                    } accent={verificationData.certainty === "WYSOKA"} />
+                  )}
+                {timing && <Tag c={`${timing}s`} />}
+                <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                  <button onClick={() => {
+                    const ts = new Date().toLocaleString("pl-PL").replace(/[,:\/\s]/g, "-");
+                    const adamTxt = adamHistory.length > 0
+                      ? "\n\n---\nROZMOWA Z ADAMEM\n" + adamHistory.map(m => (m.role === "user" ? "TY: " : "ADAM: ") + m.content).join("\n\n")
+                      : "";
+                    const src = sources
+                      ? "\n\n---\nCLAUDE:\n" + sources.a + "\n\nGPT-4O-MINI:\n" + sources.b + (sources.c && !sources.c.startsWith("[GEMINI") ? "\n\nGEMINI:\n" + sources.c : "")
+                      : "";
+                    const txt = "PYTANIE: " + q + "\n\n" + report + adamTxt + src;
+                    const a = document.createElement("a");
+                    a.href = "data:text/plain;charset=utf-8," + encodeURIComponent(txt);
+                    a.download = "silnik_" + ts + ".txt";
+                    a.click();
+                  }} style={{
+                    background: "none", border: "1px solid #1a2535", color: "#2d4a6e",
+                    fontFamily: mono, fontSize: 9, letterSpacing: "0.1em",
+                    textTransform: "uppercase", padding: "3px 10px",
+                    cursor: "pointer", borderRadius: 2
+                  }}>Eksport</button>
+                  <button onClick={() => setShowSrc(!showSrc)} style={{
+                    background: "none", border: "1px solid #1a1f26", color: "#2d4a6e",
+                    fontFamily: mono, fontSize: 9, letterSpacing: "0.1em",
+                    textTransform: "uppercase", padding: "3px 10px",
+                    cursor: "pointer", borderRadius: 2
+                  }}>
+                    {showSrc ? "Ukryj źródła" : "Pokaż źródła"}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Sources */}
+            {showSrc && sources && (
+              <div style={{ display: "grid", gridTemplateColumns: sources && sources.c && !sources.c.startsWith("[GEMINI") ? "1fr 1fr 1fr" : "1fr 1fr", gap: 8, marginTop: 10 }}>
+                {[
+                { name: "Claude", text: sources.a },
+                { name: "GPT-4o-mini", text: sources.b },
+                sources.c && !sources.c.startsWith("[GEMINI") ? { name: "Gemini", text: sources.c } : null
+              ].filter(Boolean).map(s => (
+                  <div key={s.name} style={{
+                    background: "#080b0e", border: "1px solid #1a1f26",
+                    borderRadius: 3, padding: "13px 14px"
+                  }}>
+                    <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase", color: "#2d4a6e", marginBottom: 8 }}>
+                      {s.name}
+                    </div>
+                    <div style={{ fontSize: 11, lineHeight: 1.65, color: "#4a5560" }}>{s.text}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ADAM */}
+            <div style={{ marginTop: 16 }}>
+              <div style={{
+                background: "#080b0e", border: "1px solid #1a1f26",
+                borderLeft: "2px solid #2d4a6e", borderRadius: 4
+              }}>
+                <div style={{
+                  padding: "12px 18px", borderBottom: "1px solid #1a1f26",
+                  display: "flex", alignItems: "center", gap: 8
+                }}>
+                  <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.2em", textTransform: "uppercase", color: "#5b9bd5" }}>
+                    ADAM
+                  </div>
+                  <div style={{ fontFamily: mono, fontSize: 9, color: "#1e3a5a", letterSpacing: "0.06em" }}>
+                    pogłęb temat · zapytaj o szczegóły
+                  </div>
+                </div>
+
+                {adamHistory.length > 0 && (
+                  <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
+                    {adamHistory.map((msg, i) => (
+                      <div key={i} style={{ alignSelf: msg.role === "user" ? "flex-end" : "flex-start", maxWidth: "85%" }}>
+                        <div style={{
+                          fontSize: 9, fontFamily: mono, letterSpacing: "0.1em",
+                          textTransform: "uppercase",
+                          color: msg.role === "user" ? "#2d4a6e" : "#3a6a4a",
+                          marginBottom: 4
+                        }}>
+                          {msg.role === "user" ? "Ty" : "Adam"}
+                        </div>
+                        <div style={{
+                          fontSize: 13, lineHeight: 1.7,
+                          color: msg.role === "user" ? "#8a96a4" : "#b0b8c4",
+                          background: msg.role === "user" ? "#0a0f15" : "transparent",
+                          padding: msg.role === "user" ? "8px 12px" : "0",
+                          borderRadius: 3
+                        }}>
+                          {msg.content}
+                        </div>
+                      </div>
+                    ))}
+                    {adamLoading && (
+                      <div style={{ fontFamily: mono, fontSize: 10, color: "#2d4a6e", letterSpacing: "0.06em" }}>
+                        Adam pisze...
+                      </div>
+                    )}
+                    <div ref={adamEndRef} />
+                  </div>
+                )}
+
+                <div style={{
+                  padding: "12px 18px",
+                  borderTop: adamHistory.length > 0 ? "1px solid #1a1f26" : "none",
+                  display: "flex", gap: 8
+                }}>
+                  <input
+                    type="text"
+                    placeholder="Zapytaj Adama o szczegóły..."
+                    value={adamInput}
+                    onChange={e => setAdamInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") askAdam(); }}
+                    style={{
+                      flex: 1, background: "#0d1015", border: "1px solid #1a1f26",
+                      color: "#c8cdd6", fontFamily: sans, fontSize: 14,
+                      padding: "10px 12px", borderRadius: 3
+                    }}
+                  />
+                  <button onClick={askAdam} disabled={adamLoading || !adamInput.trim()} style={{
+                    background: "#0c1a28", border: "1px solid #2d4a6e",
+                    color: "#5b9bd5", fontFamily: mono, fontSize: 10,
+                    letterSpacing: "0.15em", textTransform: "uppercase",
+                    padding: "10px 14px", borderRadius: 3, cursor: "pointer",
+                    opacity: adamLoading || !adamInput.trim() ? 0.4 : 1,
+                    transition: "all 0.15s", whiteSpace: "nowrap"
+                  }}>
+                    ▸ Wyślij
+                  </button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+<script>
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    window.deferredPrompt = e;
+  });
+
+  if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
+  });
+}
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./service-worker.js').then(() => {
+      if (!navigator.serviceWorker.controller && !sessionStorage.getItem('sw-reloaded')) {
+        sessionStorage.setItem('sw-reloaded', '1');
+        window.location.reload();
+      }
+    }).catch(err => console.log('[PWA] SW failed:', err));
+  });
+}
+</script>
+
+</body>
+</html>
