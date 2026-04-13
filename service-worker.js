@@ -19,18 +19,18 @@ self.addEventListener('install', e => {
 
 self.addEventListener('activate', e => {
   e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k!== CACHE_NAME).map(k => caches.delete(k)))
+    caches.keys().then(keys => 
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
 
 self.addEventListener('fetch', e => {
-  if (e.request.method!== 'GET') return;
-
+  if (e.request.method !== 'GET') return;
+  
   const url = new URL(e.request.url);
-
-  if (url.origin!== location.origin) return;
+  
+  if (url.origin !== location.origin) return;
 
   if (e.request.mode === 'navigate') {
     e.respondWith(
