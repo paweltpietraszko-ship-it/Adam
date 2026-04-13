@@ -130,7 +130,7 @@ def ask_gemini(question: str) -> str:
         return "[GEMINI: brak klucza API]"
     try:
         response = gemini_client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="models/gemini-1.5-flash",
             contents=question
         )
         text = getattr(response, 'text', None)
@@ -483,6 +483,10 @@ from fastapi.responses import FileResponse
 
 @app.get("/")
 def root():
+    return FileResponse("index.html")
+
+@app.get("/index.html")
+def index_html():
     return FileResponse("index.html")
 
 @app.get("/manifest.json")
