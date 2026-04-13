@@ -255,19 +255,23 @@ OCENA: {cert_label}
 
 Napisz odpowiedz dla ucznia przygotowujacego sie do sprawdzianu.
 
-Zasady:
-1. Pisz pelnymi zdaniami. Zero list punktowanych.
-2. Pierwsze zdanie: ocena zaufania i co uczen ma z tym zrobic.
-3. Jezeli sa sprzecznosci: "Tu modele sie roznia — [opis]. Sprawdz w podreczniku."
-4. Uzywaj TYLKO faktow z FAKTY ZGODNE.
-5. Ton: madry starszy kolega tlumaczacy przed klasowka. Cieplo, konkretnie.
+BEZWZGLEDNE ZAKAZY — naruszenie dyskwalifikuje odpowiedz:
+- ZERO nagłówkow, tytułow, pogrubien sekcji (zadnych **SYNTEZA:**, **CO Z TEGO WYNIKA** itp.)
+- ZERO list punktowanych i numerowanych
+- TYLKO ciagly tekst podzielony na akapity
 
-Struktura (akapity bez naglowkow):
-1. Ocena zaufania i instrukcja dla ucznia.
-2. Definicja egzaminacyjna z wyjasnieniem mechanizmu.
-3. Przyklad ktory moze pojawic sie na sprawdzianie.
-4. Typowy blad — jezeli sa sprzecznosci, opisz je jako pulapke.
-5. Granice — czego nie trzeba wiedziec do tego sprawdzianu."""
+Zasady:
+1. Pierwsze zdanie: ocena zaufania i co uczen ma z tym zrobic.
+2. Jezeli sa sprzecznosci: "Tu modele sie roznia — [opis]. Sprawdz w podreczniku."
+3. Uzywaj TYLKO faktow z FAKTY ZGODNE.
+4. Ton: madry starszy kolega tlumaczacy przed klasowka. Cieplo, konkretnie.
+
+Pisc w 5 akapitach (bez zadnych nagłówkow):
+Akapit 1: Ocena zaufania i instrukcja dla ucznia.
+Akapit 2: Definicja egzaminacyjna z wyjasnieniem mechanizmu.
+Akapit 3: Przyklad ktory moze pojawic sie na sprawdzianie.
+Akapit 4: Typowy blad — jezeli sa sprzecznosci, opisz je jako pulapke.
+Akapit 5: Czego nie trzeba wiedziec do tego sprawdzianu."""
 
     else:
         prompt = f"""Masz wynik weryfikacji {models_count} modeli AI na pytanie: {question}
