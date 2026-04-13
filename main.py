@@ -476,15 +476,8 @@ def chat(msg: ChatMessage, request: Request):
         return {"answer": "", "status": "error", "error": str(e)}
 
 
+from fastapi.responses import FileResponse
+
 @app.get("/")
 def root():
-    html = """<!DOCTYPE html>
-<html lang="pl"><head><meta charset="UTF-8"><title>Triangulum</title>
-<style>body{background:#0a0c0f;color:#c8cdd6;font-family:monospace;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.box{text-align:center;padding:24px}.title{font-size:24px;color:#5b9bd5;margin-bottom:8px}.sub{font-size:11px;color:#2d4a6e;letter-spacing:.15em;text-transform:uppercase;margin-bottom:24px}.ep{background:#0d1015;border:1px solid #1a1f26;border-radius:3px;padding:10px 16px;margin-bottom:8px;font-size:12px;color:#3a6a8a}.status{font-size:10px;color:#3a7a5a;margin-top:16px}</style>
-</head><body><div class="box">
-<div class="title">TRIANGULUM</div>
-<div class="sub">System weryfikacji multi-model</div>
-<div class="ep">POST /ask</div><div class="ep">POST /chat</div><div class="ep">GET /health</div>
-<div class="status">Backend aktywny · Claude · GPT-4o-mini · Gemini</div>
-</div></body></html>"""
-    return Response(content=html, media_type="text/html")
+    return FileResponse("index.html")
