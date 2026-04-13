@@ -130,7 +130,7 @@ def ask_gemini(question: str) -> str:
         return "[GEMINI: brak klucza API]"
     try:
         response = gemini_client.models.generate_content(
-            model="gemini-2.5-pro",
+            model="gemini-1.5-flash",
             contents=[{"parts": [{"text": question}]}]
         )
         text = getattr(response, 'text', None)
