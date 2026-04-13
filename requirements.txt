@@ -5,3 +5,4 @@ anthropic
 google-genai
 python-dotenv
 requests
+slowapi
