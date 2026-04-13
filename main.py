@@ -1,6 +1,5 @@
 import os
 import json
-import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from typing import Optional, Literal
 
@@ -35,6 +34,7 @@ ALLOWED_ORIGINS = [
     "https://adam-production-89ef.up.railway.app",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
+    # "null" usuniete — niebezpieczne w produkcji
 ]
 app.add_middleware(
     CORSMiddleware,
@@ -49,6 +49,9 @@ claude_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 gemini_api_key = os.getenv("GEMINI_API_KEY")
 
 
+# =======================
+# Schemas
+# =======================
 class Question(BaseModel):
     question: str
     mode: Literal["ogolny", "uczen"] = "ogolny"
@@ -78,6 +81,9 @@ class ChatMessage(BaseModel):
         return v
 
 
+# =======================
+# Model calls
+# =======================
 def ask_openai(question: str) -> str:
     for attempt in range(2):
         try:
@@ -89,7 +95,6 @@ def ask_openai(question: str) -> str:
             result = r.choices[0].message.content
             return result if result and result.strip() else "[OPENAI ERROR] pusta odpowiedz"
         except Exception as e:
-            logger.error(f"[OPENAI] Attempt {attempt+1} failed: {e}")
             if attempt == 1:
                 return f"[OPENAI ERROR] {e}"
     return "[OPENAI ERROR] max retries"
@@ -98,36 +103,34 @@ def ask_openai(question: str) -> str:
 def ask_claude(question: str) -> str:
     try:
         r = claude_client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-sonnet-4-6",
             max_tokens=2000,
             messages=[{"role": "user", "content": question}]
         )
         blocks = [b for b in r.content if hasattr(b, 'text') and b.text]
         return blocks[0].text if blocks else "[CLAUDE ERROR] brak tekstu w odpowiedzi"
     except Exception as e:
-        logger.error(f"[CLAUDE] {e}", exc_info=True)
         return f"[CLAUDE ERROR] {e}"
 
 
+# Klient Gemini inicjalizowany raz na poziomie modulu
 gemini_client = google_genai.Client(api_key=gemini_api_key) if gemini_api_key else None
 
+# Loguj stan kluczy przy starcie
 if not os.getenv("OPENAI_API_KEY"):
     logging.warning("[STARTUP] Brak OPENAI_API_KEY")
 if not os.getenv("ANTHROPIC_API_KEY"):
     logging.warning("[STARTUP] Brak ANTHROPIC_API_KEY")
 if not gemini_api_key:
     logging.warning("[STARTUP] Brak GEMINI_API_KEY — Gemini niedostepny")
-else:
-    logging.info(f"[STARTUP] Gemini client initialized, key: {gemini_api_key[:10]}...")
 
 
 def ask_gemini(question: str) -> str:
     if not gemini_client:
         return "[GEMINI: brak klucza API]"
     try:
-        logger.info(f"[GEMINI] Calling models/gemini-2.5-flash")
         response = gemini_client.models.generate_content(
-            model="models/gemini-1.5-flash-latest",
+            model="models/gemini-1.5-flash",
             contents=question
         )
         text = getattr(response, 'text', None)
@@ -135,15 +138,15 @@ def ask_gemini(question: str) -> str:
             try:
                 text = response.candidates[0].content.parts[0].text
             except Exception:
-                logger.error(f"[GEMINI] No text in response: {response}")
                 return "[GEMINI ERROR] Brak tekstu w odpowiedzi"
-        logger.info(f"[GEMINI] Success, length={len(text)}")
         return text
     except Exception as e:
-        logger.error(f"[GEMINI] ERROR: {e}", exc_info=True)
         return f"[GEMINI ERROR] {e}"
 
 
+# =======================
+# WARSTWA 1: Weryfikacja (JSON, niewidoczna)
+# =======================
 def extract_verification(question: str, a: str, b: str, c: str) -> dict:
     gemini_section = (
         f"C (Gemini):\n{c}"
@@ -174,20 +177,20 @@ Schemat:
     try:
         r = openai_client.chat.completions.create(
             model="gpt-4o-mini",
-            temperature=0,
+            temperature=0,  # deterministic JSON output
             messages=[{"role": "user", "content": prompt}]
         )
         raw = r.choices[0].message.content or ""
         clean = raw.replace("```json", "").replace("```", "").strip()
         result = json.loads(clean)
-        
+        # Validate expected structure
         if not isinstance(result.get("facts_aligned"), list):
             result["facts_aligned"] = []
         if not isinstance(result.get("contradictions"), list):
             result["contradictions"] = []
         if not isinstance(result.get("uncertain"), list):
             result["uncertain"] = []
-        
+        # Count only models that actually responded without error
         working = 0
         for resp in [a, b, c]:
             if resp and isinstance(resp, str) and not any(
@@ -198,7 +201,6 @@ Schemat:
         return result
     except json.JSONDecodeError:
         logger.error(f"[VERIFICATION] JSONDecodeError — raw: {raw[:200]}")
-        working = sum(1 for r in [a,b,c] if r and not r.startswith("["))
         return {
             "certainty": "NISKA",
             "certainty_reason": "Blad parsowania JSON z weryfikatora",
@@ -207,7 +209,6 @@ Schemat:
         }
     except Exception as e:
         logger.error(f"[VERIFICATION] Error: {e}", exc_info=True)
-        working = sum(1 for r in [a,b,c] if r and not r.startswith("["))
         return {
             "certainty": "NISKA",
             "certainty_reason": f"Blad ekstrakcji: {str(e)}",
@@ -216,6 +217,9 @@ Schemat:
         }
 
 
+# =======================
+# WARSTWA 2: Prezentacja (proza, widoczna)
+# =======================
 def render_synthesis(question: str, verification: dict, mode: str) -> str:
     if not verification:
         logger.warning("[SYNTHESIS] Pusta weryfikacja — uzywam wartosci domyslnych")
@@ -251,19 +255,23 @@ OCENA: {cert_label}
 
 Napisz odpowiedz dla ucznia przygotowujacego sie do sprawdzianu.
 
-Zasady:
-1. Pisz pelnymi zdaniami. Zero list punktowanych.
-2. Pierwsze zdanie: ocena zaufania i co uczen ma z tym zrobic.
-3. Jezeli sa sprzecznosci: "Tu modele sie roznia — [opis]. Sprawdz w podreczniku."
-4. Uzywaj TYLKO faktow z FAKTY ZGODNE.
-5. Ton: madry starszy kolega tlumaczacy przed klasowka. Cieplo, konkretnie.
+BEZWZGLEDNE ZAKAZY — naruszenie dyskwalifikuje odpowiedz:
+- ZERO nagłówkow, tytułow, pogrubien sekcji (zadnych **SYNTEZA:**, **CO Z TEGO WYNIKA** itp.)
+- ZERO list punktowanych i numerowanych
+- TYLKO ciagly tekst podzielony na akapity
 
-Struktura (akapity bez naglowkow):
-1. Ocena zaufania i instrukcja dla ucznia.
-2. Definicja egzaminacyjna z wyjasnieniem mechanizmu.
-3. Przyklad ktory moze pojawic sie na sprawdzianie.
-4. Typowy blad — jezeli sa sprzecznosci, opisz je jako pulapke.
-5. Granice — czego nie trzeba wiedziec do tego sprawdzianu."""
+Zasady:
+1. Pierwsze zdanie: ocena zaufania i co uczen ma z tym zrobic.
+2. Jezeli sa sprzecznosci: "Tu modele sie roznia — [opis]. Sprawdz w podreczniku."
+3. Uzywaj TYLKO faktow z FAKTY ZGODNE.
+4. Ton: madry starszy kolega tlumaczacy przed klasowka. Cieplo, konkretnie.
+
+Pisc w 5 akapitach (bez zadnych nagłówkow):
+Akapit 1: Ocena zaufania i instrukcja dla ucznia.
+Akapit 2: Definicja egzaminacyjna z wyjasnieniem mechanizmu.
+Akapit 3: Przyklad ktory moze pojawic sie na sprawdzianie.
+Akapit 4: Typowy blad — jezeli sa sprzecznosci, opisz je jako pulapke.
+Akapit 5: Czego nie trzeba wiedziec do tego sprawdzianu."""
 
     else:
         prompt = f"""Masz wynik weryfikacji {models_count} modeli AI na pytanie: {question}
@@ -274,27 +282,53 @@ SPRZECZNOSCI: {contras}
 NIEPEWNE: {uncertain}
 OCENA: {cert_label}
 
-Napisz synteze w trybie ogolnym.
+Napisz odpowiedz dla doroslego ktory chce zrozumiec temat.
 
 Zasady:
-1. Pisz pelnymi zdaniami. Zero list punktowanych.
+1. Pisz pelnymi zdaniami z wyjasnieniem mechanizmu.
 2. Pierwsze zdanie: ocena zaufania.
-3. Uzywaj TYLKO faktow z FAKTY ZGODNE.
-4. Jezeli sa sprzecznosci, wspomnij o nich krotko.
-5. Ton: rzeczowy, bez zargonu."""
+3. Sprzecznosci opisz jako roznice perspektyw, nie ukrywaj.
+4. Liczby zawsze z kontekstem.
+5. Uzywaj TYLKO faktow z FAKTY ZGODNE.
+6. Ton: madry znajomy przy kawie. Rzeczowy, bezposredni, cieplo.
+7. Badz szczodry w wyjasnieniach.
+
+Uzyj tych naglowkow:
+
+**SYNTEZA:** [1-2 zdania]
+
+**CO Z TEGO WYNIKA**
+[Konkretna odpowiedz z faktow zgodnych]
+
+**DLACZEGO TAK**
+[Mechanizm przyczynowy]
+
+**TWARDE FAKTY**
+[Liczby i przyklady z kontekstem. Jezeli brak: "Modele nie podaly zgodnych danych ilosciowych."]
+
+**CO WIEMY, A CZEGO NIE**
+- pewne: [tezy z co najmniej 2 modeli]
+- czesciowe: [tezy z 1 modelu]
+- niepewne: [sprzecznosci jako roznice perspektyw]
+
+**GDZIE SA GRANICE**
+[Kiedy ta wiedza nie dziala. Co zalezy od kontekstu.]"""
 
     try:
-        r = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            temperature=0.3,
+        r = claude_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
             messages=[{"role": "user", "content": prompt}]
         )
-        return r.choices[0].message.content or ""
+        blocks = [b for b in r.content if hasattr(b, 'text') and b.text]
+        return blocks[0].text if blocks else "[SYNTHESIS ERROR] brak tekstu"
     except Exception as e:
-        logger.error(f"[SYNTHESIS] Error: {e}")
         return f"[SYNTHESIS ERROR] {e}"
 
 
+# =======================
+# Adam
+# =======================
 def adam_reply(question: str, context: str, verification: dict, history: list) -> str:
     if not verification:
         verification = {"certainty": "nieznana", "facts_aligned": [], "contradictions": []}
@@ -315,24 +349,26 @@ Pewnosc: {cert}
 Fakty zgodne miedzy modelami: {facts}
 Sprzecznosci miedzy modelami: {contras}
 
-Zasady bezwzgledne:
-- Wolno ci uzywac TYLKO faktow z listy faktow zgodnych.
+Zasady:
+- Jezeli pytanie dotyczy tresci raportu: odpowiedz opierajac sie na faktach zgodnych.
 - Jezeli pytanie dotyczy sprzecznosci: "Tu modele sie roznia — [opisz roznice]."
-- Jezeli pytanie wykracza poza raport: "Tego nie ma w zweryfikowanych zrodlach. Zadaj nowe pytanie do SILNIKA."
-- Nie dodawaj wiedzy zewnetrznej. Nie spekuluj.
+- Jezeli pytanie wykracza POZA raport: odpowiedz na podstawie swojej wiedzy, ale ZAWSZE poprzedz odpowiedz zdaniem: "To wykracza poza zweryfikowany raport — odpowiadam jako Adam na podstawie wiedzy Claude 4, bez weryfikacji przez silnik. Jesli chcesz pewniejszej odpowiedzi, zadaj to pytanie bezposrednio do SILNIKA."
 - Ton: naturalny, rzeczowy, cieplo. Pelne zdania z wyjasnieniem."""
 
     if not isinstance(history, list):
         history = []
     messages = [
-        msg for msg in history[-20:]
-        if isinstance(msg, dict) and "role" in msg and "content" in msg
+        msg for msg in history[-20:]  # max 20 wiadomosci
+        if isinstance(msg, dict)
+        and msg.get("role") in ("user", "assistant")  # blokuj prompt injection przez role=system
+        and isinstance(msg.get("content"), str)
+        and msg["content"].strip()
     ]
     messages.append({"role": "user", "content": question})
 
     try:
         r = claude_client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-haiku-4-5",
             max_tokens=800,
             system=system,
             messages=messages
@@ -340,15 +376,18 @@ Zasady bezwzgledne:
         blocks = [b for b in r.content if hasattr(b, 'text') and b.text]
         return blocks[0].text if blocks else "[ADAM ERROR] brak tekstu"
     except Exception as e:
-        logger.error(f"[ADAM] {e}", exc_info=True)
         return f"[ADAM ERROR] {e}"
 
 
+# =======================
+# API
+# =======================
 @app.get("/health")
 def health():
     return {
         "status": "ok",
         "models": {
+            # Sprawdza konfiguracje, nie polaczenie z API
             "openai": openai_client is not None,
             "claude": claude_client is not None,
             "gemini": gemini_client is not None
@@ -357,46 +396,46 @@ def health():
 
 
 @app.post("/ask")
-@limiter.limit("30/minute")
+@limiter.limit("10/minute")
 def ask(q: Question, request: Request):
     try:
-        start = time.time()
+        import time
+        t_start = time.time()
         with ThreadPoolExecutor(max_workers=3) as ex:
+            t_claude = time.time()
             fc = ex.submit(ask_claude, q.question)
+            t_openai = time.time()
             fo = ex.submit(ask_openai, q.question)
+            t_gemini = time.time()
             fg = ex.submit(ask_gemini, q.question)
 
             claude_r = "[CLAUDE TIMEOUT]"
             openai_r = "[OPENAI TIMEOUT]"
             gemini_r = "[GEMINI TIMEOUT]"
 
-            try: 
-                claude_r = fc.result(timeout=30)
-            except TimeoutError: 
-                logger.warning("[MODEL] claude timeout")
-            
-            try: 
-                openai_r = fo.result(timeout=30)
-            except TimeoutError: 
-                logger.warning("[MODEL] openai timeout")
-            
-            try: 
-                gemini_r = fg.result(timeout=30)
-            except TimeoutError: 
-                logger.warning("[MODEL] gemini timeout")
+            try: claude_r = fc.result(timeout=30)
+            except TimeoutError: pass
+            logger.info(f"[MODEL] claude={time.time()-t_claude:.1f}s")
 
+            try: openai_r = fo.result(timeout=30)
+            except TimeoutError: pass
+            logger.info(f"[MODEL] openai={time.time()-t_openai:.1f}s")
+
+            try: gemini_r = fg.result(timeout=30)
+            except TimeoutError: pass
+            logger.info(f"[MODEL] gemini={time.time()-t_gemini:.1f}s")
+
+        # Sprawdz czy wszystkie modele sa niedostepne
         def is_error(resp):
             return not resp or any(resp.startswith(p) for p in ["[CLAUDE", "[OPENAI", "[GEMINI"]) or "TIMEOUT" in resp
 
         working_models = [r for r in [claude_r, openai_r, gemini_r] if not is_error(r)]
-        logger.info(f"[ASK] working={len(working_models)}/3, claude_ok={not is_error(claude_r)}, openai_ok={not is_error(openai_r)}, gemini_ok={not is_error(gemini_r)}")
-        
-        if len(working_models) < 1:
+        if len(working_models) < 2:
             logger.warning(f"Za malo modeli: {len(working_models)}/3")
             return {
                 "question": q.question, "mode": q.mode,
                 "openai": openai_r, "claude": claude_r, "gemini": gemini_r,
-                "synthesis": f"Za mało dostępnych modeli ({len(working_models)}/3). Spróbuj ponownie.",
+                "synthesis": f"Za mało dostępnych modeli ({len(working_models)}/3). Wymagane co najmniej 2. Spróbuj ponownie.",
                 "verification": {"certainty": "NISKA", "certainty_reason": f"Tylko {len(working_models)} model(e) odpowiedzia.", "facts_aligned": [], "contradictions": [], "uncertain": [], "models_count": len(working_models)},
                 "status": "error"
             }
@@ -404,8 +443,7 @@ def ask(q: Question, request: Request):
         verification_data = extract_verification(q.question, claude_r, openai_r, gemini_r)
         synthesis_text = render_synthesis(q.question, verification_data, q.mode)
 
-        total_time = time.time() - start
-        logger.info(f"[ASK] models={verification_data.get('models_count')}, certainty={verification_data.get('certainty')}, mode={q.mode}, total={total_time:.1f}s")
+        logger.info(f"[ASK] models={verification_data.get('models_count')}, certainty={verification_data.get('certainty')}, mode={q.mode}")
         return {
             "question": q.question,
             "mode": q.mode,
@@ -438,7 +476,6 @@ def chat(msg: ChatMessage, request: Request):
         )
         return {"answer": answer, "status": "ok"}
     except Exception as e:
-        logger.error(f"[CHAT] {e}", exc_info=True)
         return {"answer": "", "status": "error", "error": str(e)}
 
 
@@ -459,3 +496,23 @@ def manifest():
 @app.get("/service-worker.js")
 def service_worker():
     return FileResponse("service-worker.js", media_type="application/javascript")
+
+@app.get("/apple-touch-icon.png")
+def apple_touch_icon():
+    return FileResponse("apple-touch-icon.png", media_type="image/png")
+
+@app.get("/icon-192.png")
+def icon_192():
+    return FileResponse("icon-192.png", media_type="image/png")
+
+@app.get("/icon-512.png")
+def icon_512():
+    return FileResponse("icon-512.png", media_type="image/png")
+
+@app.get("/icon-maskable.png")
+def icon_maskable():
+    return FileResponse("icon-maskable.png", media_type="image/png")
+
+@app.get("/favicon.ico")
+def favicon():
+    return FileResponse("favicon.ico", media_type="image/x-icon")
