@@ -58,6 +58,8 @@ tavily_client = TavilyClient(api_key=tavily_api_key) if tavily_api_key else None
 class Question(BaseModel):
     question: str
     mode: Literal["ogolny", "uczen"] = "ogolny"
+    file_data: Optional[str] = None
+    file_type: Optional[str] = None
 
     @field_validator('question')
     @classmethod
@@ -87,13 +89,16 @@ class ChatMessage(BaseModel):
 # =======================
 # Model calls
 # =======================
-def ask_openai(question: str) -> str:
+def ask_openai(question: str, file_data: str = None, file_type: str = None) -> str:
     for attempt in range(2):
         try:
+            content = []
+            if file_data and file_type and file_type.startswith("image/"):
+                content.append({"type": "image_url", "image_url": {"url": f"data:{file_type};base64,{file_data}"}})
+            content.append({"type": "text", "text": question})
             r = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                max_tokens=1500,
-                messages=[{"role": "user", "content": question}]
+                model="gpt-4o-mini", max_tokens=1500,
+                messages=[{"role": "user", "content": content if len(content) > 1 else question}]
             )
             result = r.choices[0].message.content
             return result if result and result.strip() else "[OPENAI ERROR] pusta odpowiedz"
@@ -103,12 +108,18 @@ def ask_openai(question: str) -> str:
     return "[OPENAI ERROR] max retries"
 
 
-def ask_claude(question: str) -> str:
+def ask_claude(question: str, file_data: str = None, file_type: str = None) -> str:
     try:
+        content = []
+        if file_data and file_type:
+            if file_type == "application/pdf":
+                content.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": file_data}})
+            elif file_type.startswith("image/"):
+                content.append({"type": "image", "source": {"type": "base64", "media_type": file_type, "data": file_data}})
+        content.append({"type": "text", "text": question})
         r = claude_client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": question}]
+            model="claude-sonnet-4-6", max_tokens=2000,
+            messages=[{"role": "user", "content": content}]
         )
         blocks = [b for b in r.content if hasattr(b, 'text') and b.text]
         return blocks[0].text if blocks else "[CLAUDE ERROR] brak tekstu w odpowiedzi"
@@ -128,20 +139,24 @@ if not tavily_api_key:
     logging.warning("[STARTUP] Brak TAVILY_API_KEY — web search niedostepny")
 
 
-def ask_gemini(question: str) -> str:
+def ask_gemini(question: str, file_data: str = None, file_type: str = None) -> str:
     if not gemini_client:
         return "[GEMINI: brak klucza API]"
     try:
+        if file_data and file_type:
+            contents = [{"inline_data": {"mime_type": file_type, "data": file_data}}, question]
+        else:
+            contents = question
         response = gemini_client.models.generate_content(
             model="gemini-flash-latest",
-            contents=question
+            contents=contents
         )
         text = getattr(response, 'text', None)
         if text is None:
             try:
                 text = response.candidates[0].content.parts[0].text
             except Exception as inner_e:
-                logger.error(f"[GEMINI] Brak tekstu — candidates: {getattr(response, 'candidates', 'brak')}, error: {inner_e}")
+                logger.error(f"[GEMINI] Brak tekstu — error: {inner_e}")
                 return "[GEMINI ERROR] Brak tekstu w odpowiedzi"
         return text
     except Exception as e:
@@ -441,11 +456,11 @@ def ask(q: Question, request: Request):
         import time
         with ThreadPoolExecutor(max_workers=4) as ex:
             t_claude = time.time()
-            fc = ex.submit(ask_claude, q.question)
+            fc = ex.submit(ask_claude, q.question, q.file_data, q.file_type)
             t_openai = time.time()
-            fo = ex.submit(ask_openai, q.question)
+            fo = ex.submit(ask_openai, q.question, q.file_data, q.file_type)
             t_gemini = time.time()
-            fg = ex.submit(ask_gemini, q.question)
+            fg = ex.submit(ask_gemini, q.question, q.file_data, q.file_type)
             t_tavily = time.time()
             ft = ex.submit(ask_tavily, q.question)
 
