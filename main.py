@@ -466,7 +466,7 @@ def ask(q: Question, request: Request):
             gemini_r = "[GEMINI TIMEOUT]"
             tavily_r = "[TAVILY: pominiety — analiza pliku]"
 
-            try: claude_r = fc.result(timeout=30)
+            try: claude_r = fc.result(timeout=50 if q.file_data else 30)
             except TimeoutError: pass
 
             try: openai_r = fo.result(timeout=30)
