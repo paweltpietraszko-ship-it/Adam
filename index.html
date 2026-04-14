@@ -73,7 +73,6 @@ function App() {
   const [sources, setSources] = useState(null);
   const [verificationData, setVerificationData] = useState({});
   const [report, setReport] = useState("");
-  const [reportUczen, setReportUczen] = useState("");
   const [showSrc, setShowSrc] = useState(false);
   const [err, setErr] = useState("");
   const [timing, setTiming] = useState(null);
@@ -81,8 +80,8 @@ function App() {
   const [adamHistory, setAdamHistory] = useState([]);
   const [adamInput, setAdamInput] = useState("");
   const [mode, setMode] = useState("ogolny");
-  const modeRef = useRef("ogolny");
   const [adamLoading, setAdamLoading] = useState(false);
+  const [showDisclaimer, setShowDisclaimer] = useState(() => !localStorage.getItem("triangulum_disclaimer"));
   const timerRef = useRef(null);
   const adamEndRef = useRef(null);
 
@@ -114,7 +113,7 @@ function App() {
       const res = await fetch(`${BACKEND}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, mode: modeRef.current })
+        body: JSON.stringify({ question: q, mode: mode })
       });
 
       if (!res.ok) throw new Error(`Błąd serwera: ${res.status}`);
@@ -122,10 +121,9 @@ function App() {
 
       if (data.status === "error") throw new Error(data.error || "Nieznany błąd");
 
-      setSources({ a: data.claude || "", b: data.openai || "", c: data.gemini || "" });
+      setSources({ a: data.claude || "", b: data.openai || "", c: data.gemini || "", d: data.tavily || "" });
       setVerificationData(data.verification || {});
       setReport(data.synthesis || "");
-      setReportUczen(data.synthesis_uczen || "");
       setTiming(((Date.now() - t0) / 1000).toFixed(1));
       setStage("done");
     } catch (e) {
@@ -161,6 +159,38 @@ function App() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#0a0c0f", color: "#c8cdd6", fontFamily: sans, padding: "28px 18px" }}>
+
+      {showDisclaimer && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          zIndex: 1000, padding: 24
+        }}>
+          <div style={{
+            background: "#0d1015", border: "1px solid #2d4a6e",
+            borderRadius: 6, padding: "28px 30px", maxWidth: 480, width: "100%"
+          }}>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, letterSpacing: "0.2em", color: "#2d4a6e", textTransform: "uppercase", marginBottom: 14 }}>
+              Zanim zaczniesz
+            </div>
+            <div style={{ fontSize: 14, lineHeight: 1.8, color: "#b0b8c4", marginBottom: 24 }}>
+              Triangulum porównuje odpowiedzi kilku modeli AI i ocenia ich zgodność. Wyższa zgodność oznacza mniejsze ryzyko błędu — nie gwarancję prawdy. Przy ważnych decyzjach traktuj wynik jako punkt wyjścia, nie ostateczną odpowiedź.
+            </div>
+            <button onClick={() => {
+              localStorage.setItem("triangulum_disclaimer", "1");
+              setShowDisclaimer(false);
+            }} style={{
+              width: "100%", padding: "12px", borderRadius: 3,
+              background: "#0c1a28", border: "1px solid #2d4a6e",
+              color: "#5b9bd5", fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase",
+              cursor: "pointer"
+            }}>
+              Rozumiem, przejdź do aplikacji
+            </button>
+          </div>
+        </div>
+      )}
       <div style={{ maxWidth: 680, margin: "0 auto" }}>
 
         {/* Header */}
@@ -173,11 +203,11 @@ function App() {
               <img src="icon-192.png" style={{ width: 22, height: 22, marginRight: 6, verticalAlign: "middle", borderRadius: 4 }} />Triangulum <span style={{ fontWeight: 600, color: "#5b9bd5" }}>v3.2</span>
             </span>
             <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "#0f1419", padding: 2, borderRadius: 4, border: "1px solid #1a1f26" }}>
-              <button onClick={() => { setMode("ogolny"); modeRef.current = "ogolny"; }} style={{ padding: "2px 8px", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "ogolny" ? "#1e3a5f" : "transparent", color: mode === "ogolny" ? "#5b9bd5" : "#5a6270", cursor: "pointer" }}>OGÓLNY</button>
-              <button onClick={() => { setMode("uczen"); modeRef.current = "uczen"; }} style={{ padding: "2px 8px", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "uczen" ? "#1e3a5f" : "transparent", color: mode === "uczen" ? "#5b9bd5" : "#5a6270", cursor: "pointer" }}>UCZEŃ</button>
+              <button onClick={() => setMode("ogolny")} style={{ padding: "2px 8px", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "ogolny" ? "#1e3a5f" : "transparent", color: mode === "ogolny" ? "#5b9bd5" : "#5a6270", cursor: "pointer" }}>OGÓLNY</button>
+              <button onClick={() => setMode("uczen")} style={{ padding: "2px 8px", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "uczen" ? "#1e3a5f" : "transparent", color: mode === "uczen" ? "#5b9bd5" : "#5a6270", cursor: "pointer" }}>UCZEŃ</button>
             </div>
             <span style={{ fontFamily: mono, fontSize: 9, color: "#1e3a5a", letterSpacing: "0.08em" }}>
-              CLAUDE · GPT-4O-MINI · GEMINI · ADAM
+              CLAUDE · GPT-4O-MINI · GEMINI · TAVILY · ADAM
             </span>
           </div>
         </div>
@@ -259,25 +289,31 @@ function App() {
         )}
 
         {/* Report */}
-        {stage === "done" && (report || reportUczen) && (
+        {stage === "done" && report && (
           <div>
             <div style={{
               background: "#0d1015", border: "1px solid #1a1f26",
               borderLeft: "2px solid #1e3a5f", borderRadius: 4, padding: "24px 26px"
             }}>
-              {(mode === "uczen" ? reportUczen : report).split("\n").map((line, i) => <ReportLine key={i} text={line} />)}
+              {report.split("\n").map((line, i) => <ReportLine key={i} text={line} />)}
 
               <div style={{
                 display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6,
                 marginTop: 20, paddingTop: 14, borderTop: "1px solid #1a1f26"
               }}>
-                <Tag c={sources && sources.c && !sources.c.startsWith("[GEMINI") ? "3 modele" : "2 modele"} />
+                <Tag c={(() => {
+                  let count = 2;
+                  if (sources && sources.c && !sources.c.startsWith("[GEMINI")) count++;
+                  if (sources && sources.d && !sources.d.startsWith("[TAVILY")) count++;
+                  return `${count} źródła`;
+                })()} />
                   {verificationData && verificationData.certainty && (
                     <Tag c={
+                      verificationData.certainty === "POTWIERDZONE ONLINE" ? "✓ potwierdzone online" :
                       verificationData.certainty === "WYSOKA" ? "✓ zgodne" :
                       verificationData.certainty === "SREDNIA" ? "⚠ częściowe różnice" :
                       "✕ modele się różnią"
-                    } accent={verificationData.certainty === "WYSOKA"} />
+                    } accent={verificationData.certainty === "WYSOKA" || verificationData.certainty === "POTWIERDZONE ONLINE"} />
                   )}
                 {timing && <Tag c={`${timing}s`} />}
                 <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
@@ -287,7 +323,7 @@ function App() {
                       ? "\n\n---\nROZMOWA Z ADAMEM\n" + adamHistory.map(m => (m.role === "user" ? "TY: " : "ADAM: ") + m.content).join("\n\n")
                       : "";
                     const src = sources
-                      ? "\n\n---\nCLAUDE:\n" + sources.a + "\n\nGPT-4O-MINI:\n" + sources.b + (sources.c && !sources.c.startsWith("[GEMINI") ? "\n\nGEMINI:\n" + sources.c : "")
+                      ? "\n\n---\nCLAUDE:\n" + sources.a + "\n\nGPT-4O-MINI:\n" + sources.b + (sources.c && !sources.c.startsWith("[GEMINI") ? "\n\nGEMINI:\n" + sources.c : "") + (sources.d && !sources.d.startsWith("[TAVILY") ? "\n\nTAVILY:\n" + sources.d : "")
                       : "";
                     const txt = "PYTANIE: " + q + "\n\n" + report + adamTxt + src;
                     const a = document.createElement("a");
@@ -314,11 +350,12 @@ function App() {
 
             {/* Sources */}
             {showSrc && sources && (
-              <div style={{ display: "grid", gridTemplateColumns: sources && sources.c && !sources.c.startsWith("[GEMINI") ? "1fr 1fr 1fr" : "1fr 1fr", gap: 8, marginTop: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${[sources.a, sources.b, sources.c && !sources.c.startsWith("[GEMINI"), sources.d && !sources.d.startsWith("[TAVILY")].filter(Boolean).length}, 1fr)`, gap: 8, marginTop: 10 }}>
                 {[
                 { name: "Claude", text: sources.a },
                 { name: "GPT-4o-mini", text: sources.b },
-                sources.c && !sources.c.startsWith("[GEMINI") ? { name: "Gemini", text: sources.c } : null
+                sources.c && !sources.c.startsWith("[GEMINI") ? { name: "Gemini", text: sources.c } : null,
+                sources.d && !sources.d.startsWith("[TAVILY") ? { name: "Tavily (web)", text: sources.d } : null
               ].filter(Boolean).map(s => (
                   <div key={s.name} style={{
                     background: "#080b0e", border: "1px solid #1a1f26",
@@ -426,27 +463,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>
 
 <script>
-window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    window.deferredPrompt = e;
-  });
-
-  if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
-  });
-}
-</script>
-
-<script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./service-worker.js').then(() => {
-      if (!navigator.serviceWorker.controller && !sessionStorage.getItem('sw-reloaded')) {
-        sessionStorage.setItem('sw-reloaded', '1');
-        window.location.reload();
-      }
-    }).catch(err => console.log('[PWA] SW failed:', err));
+    navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
   });
 }
 </script>
