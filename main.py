@@ -455,35 +455,31 @@ def ask(q: Question, request: Request):
     try:
         import time
         with ThreadPoolExecutor(max_workers=4) as ex:
-            t_claude = time.time()
+            t0 = time.time()
             fc = ex.submit(ask_claude, q.question, q.file_data, q.file_type)
-            t_openai = time.time()
             fo = ex.submit(ask_openai, q.question, q.file_data, q.file_type)
-            t_gemini = time.time()
             fg = ex.submit(ask_gemini, q.question, q.file_data, q.file_type)
-            t_tavily = time.time()
-            ft = ex.submit(ask_tavily, q.question)
+            ft = ex.submit(ask_tavily, q.question) if not q.file_data else None
 
             claude_r = "[CLAUDE TIMEOUT]"
             openai_r = "[OPENAI TIMEOUT]"
             gemini_r = "[GEMINI TIMEOUT]"
-            tavily_r = "[TAVILY TIMEOUT]"
+            tavily_r = "[TAVILY: pominiety — analiza pliku]"
 
             try: claude_r = fc.result(timeout=30)
             except TimeoutError: pass
-            logger.info(f"[MODEL] claude={time.time()-t_claude:.1f}s")
 
             try: openai_r = fo.result(timeout=30)
             except TimeoutError: pass
-            logger.info(f"[MODEL] openai={time.time()-t_openai:.1f}s")
 
             try: gemini_r = fg.result(timeout=30)
             except TimeoutError: pass
-            logger.info(f"[MODEL] gemini={time.time()-t_gemini:.1f}s")
 
-            try: tavily_r = ft.result(timeout=15)
-            except TimeoutError: pass
-            logger.info(f"[MODEL] tavily={time.time()-t_tavily:.1f}s")
+            if ft is not None:
+                try: tavily_r = ft.result(timeout=15)
+                except TimeoutError: pass
+
+            logger.info(f"[MODEL] total={time.time()-t0:.1f}s file={'yes' if q.file_data else 'no'} tavily={'skip' if q.file_data else 'ok'}")
 
         def is_error(resp):
             return not resp or any(resp.startswith(p) for p in ["[CLAUDE", "[OPENAI", "[GEMINI", "[TAVILY"]) or "TIMEOUT" in resp
