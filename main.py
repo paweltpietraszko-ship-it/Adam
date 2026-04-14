@@ -32,6 +32,20 @@ app = FastAPI()
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# Globalny licznik dzienny — ochrona przed nadużyciem
+from collections import defaultdict
+_daily_counter = {"date": "", "count": 0}
+DAILY_LIMIT = 250
+
+def check_daily_limit() -> bool:
+    from datetime import date
+    today = str(date.today())
+    if _daily_counter["date"] != today:
+        _daily_counter["date"] = today
+        _daily_counter["count"] = 0
+    _daily_counter["count"] += 1
+    return _daily_counter["count"] <= DAILY_LIMIT
+
 ALLOWED_ORIGINS = [
     "https://adam-production-89ef.up.railway.app",
     "http://localhost:8000",
@@ -184,6 +198,41 @@ def ask_tavily(question: str) -> str:
         return f"[TAVILY ERROR] {e}"
 
 
+def needs_web_search(question: str) -> bool:
+    """Tavily tylko gdy pytanie dotyczy aktualnych danych."""
+    keywords = [
+        "kurs", "cena", "dzisiaj", "teraz", "aktualny", "aktualna", "aktualne",
+        "pogoda", "prognoza", "wynik meczu", "notowania", "walut", "akcji",
+        "dzis", "dziś", "w tym tygodniu", "najnowsze", "ostatnie", "biezacy",
+        "bieżący", "obecnie", "live", "jaki jest", "ile kosztuje"
+    ]
+    q = question.lower()
+    return any(kw in q for kw in keywords)
+
+
+import re
+def strip_markdown(text: str) -> str:
+    """Usuwa markdown z tekstu — druga warstwa bezpieczenstwa dla trybu uczen."""
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = re.sub(r'\*(.+?)\*', r'\1', text)
+    text = re.sub(r'#{1,6}\s+', '', text)
+    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+    return text.strip()
+
+
+def fallback_synthesis(verification: dict, mode: str) -> str:
+    """Awaryjna synteza gdy Claude niedostepny."""
+    cert = verification.get("certainty", "NISKA")
+    facts = verification.get("facts_aligned", [])
+    if mode == "uczen":
+        f = facts[0] if facts else "Brak zgodnych danych."
+        return f"Pewność odpowiedzi: {cert}. Najważniejsze: {f} Szczegółowa synteza tymczasowo niedostępna."
+    else:
+        f_list = "\n- ".join(facts[:3]) if facts else "Brak zgodnych faktów."
+        return f"**SYNTEZA:** Pewność: {cert}\n\n**TWARDE FAKTY**\n- {f_list}\n\n*(Synteza awaryjna — Claude tymczasowo niedostępny)*"
+
+
 # =======================
 # WARSTWA 1: Weryfikacja (JSON, niewidoczna)
 # =======================
@@ -220,14 +269,16 @@ WYSOKA = co najmniej 2 modele AI zgodne w kluczowych faktach, brak sprzecznosci
 SREDNIA = 2 modele czesciowo zgodne LUB 1 sprzecznosc w szczegolach
 NISKA = modele roznia sie w kluczowych twierdzeniach LUB bledy/timeouty
 
-KLUCZOWA ZASADA: Jezeli model odpowiada ze nie zna aktualnych danych (kurs, cena, pogoda, wyniki na zywo) — jego odpowiedz POMIJASZ przy ocenie pewnosci. Uczciwy brak wiedzy nie jest sprzecznoscia. Liczy sie tylko model ktory podaje konkretna odpowiedz.
+KLUCZOWA ZASADA: Jezeli model odpowiada ze nie zna aktualnych danych (kurs, cena, pogoda, wyniki na zywo) — jego odpowiedz POMIJASZ przy ocenie pewnosci. Uczciwy brak wiedzy nie jest sprzecznoscia.
 Jezeli Tavily ma konkretne dane liczbowe a modele AI przyznaja brak wiedzy — uzyj danych Tavily jako podstawy i ocen pewnosc na POTWIERDZONE ONLINE jezeli dane sa spojne, SREDNIA jezeli rozne.
 
-Tavily jest TYLKO sygnałem weryfikacyjnym — nie jest zrodlem tresci. Nie cytuj Tavily w facts_aligned.
+FILTR ZRODEL TAVILY: Jezeli Tavily zwraca sprzeczne dane z roznych zrodel — wybierz dane ze zrodel instytucjonalnych: domeny .gov .edu .org oficjalne kalendarze serwisy finansowe (nbp.pl bankier.pl investing.com). Odrzuc dane z social media (facebook.com twitter.com instagram.com tiktok.com) i blogów. Jezeli tylko social media dostepne — traktuj jako NISKA pewnosc.
+
+Tavily jest sygnałem weryfikacyjnym — nie cytuj Tavily w facts_aligned chyba ze jest jedynym zrodlem konkretnej odpowiedzi (np. aktualna data, kurs waluty).
 Jezeli Tavily jest niedostepny lub pusty: ignoruj go calkowicie.
 
 Schemat:
-{{"certainty":"POTWIERDZONE ONLINE|WYSOKA|SREDNIA|NISKA","certainty_reason":"jedno zdanie","facts_aligned":["fakt z co najmniej 2 modeli AI"],"contradictions":[{{"topic":"temat","positions":{{"claude":"stanowisko","gpt":"stanowisko","gemini":"stanowisko lub brak"}}}}],"uncertain":["teza spekulacyjna"],"models_count":2}}"""
+{{"certainty":"POTWIERDZONE ONLINE|WYSOKA|SREDNIA|NISKA","certainty_reason":"jedno zdanie","facts_aligned":["fakt z co najmniej 2 modeli AI lub z Tavily gdy modele nie wiedza"],"contradictions":[{{"topic":"temat","positions":{{"claude":"stanowisko","gpt":"stanowisko","gemini":"stanowisko lub brak"}}}}],"uncertain":["teza spekulacyjna"],"models_count":2}}"""
 
     working = 0
     try:
@@ -273,7 +324,7 @@ Schemat:
 # =======================
 # WARSTWA 2: Prezentacja (proza, widoczna)
 # =======================
-def render_synthesis(question: str, verification: dict, mode: str) -> str:
+def render_synthesis(question: str, verification: dict, mode: str, a: str = "", b: str = "", c: str = "") -> str:
     if not verification:
         logger.warning("[SYNTHESIS] Pusta weryfikacja — uzywam wartosci domyslnych")
         verification = {
@@ -291,11 +342,26 @@ def render_synthesis(question: str, verification: dict, mode: str) -> str:
     models_count = verification.get("models_count", 0)
 
     cert_labels = {
+        "POTWIERDZONE ONLINE": "Odpowiedz potwierdzona przez aktualne zrodla internetowe.",
         "WYSOKA": "Modele sa zgodne — mozesz temu zaufac.",
         "SREDNIA": "Modele czesciowo sie roznia — sprawdz kluczowe fakty przed wazna decyzja.",
         "NISKA": "Modele sie roznia — potraktuj te odpowiedz jako punkt wyjscia, nie jako pewnik."
     }
     cert_label = cert_labels.get(cert, cert_labels["NISKA"])
+
+    # Przycinamy oryginalne odpowiedzi do 1000 znaków każda (ochrona przed limitem tokenów)
+    a_short = (a[:1000] + "...") if len(a) > 1000 else a
+    b_short = (b[:1000] + "...") if len(b) > 1000 else b
+    c_short = (c[:1000] + "...") if len(c) > 1000 else c
+
+    sources_section = ""
+    if any([a_short, b_short, c_short]):
+        parts = []
+        if a_short and not a_short.startswith("[CLAUDE"): parts.append(f"Claude: {a_short}")
+        if b_short and not b_short.startswith("[OPENAI"): parts.append(f"GPT: {b_short}")
+        if c_short and not c_short.startswith("[GEMINI"): parts.append(f"Gemini: {c_short}")
+        if parts:
+            sources_section = "\n\nORYGINALNE ODPOWIEDZI MODELI (uzywaj jako kontekst, nie cytuj dosłownie):\n" + "\n\n".join(parts)
 
     if mode == "uczen":
         prompt = f"""Masz wynik weryfikacji {models_count} modeli AI na pytanie: {question}
@@ -304,7 +370,9 @@ PEWNOSC: {cert} — {reason}
 FAKTY ZGODNE: {facts}
 SPRZECZNOSCI: {contras}
 NIEPEWNE: {uncertain}
-OCENA: {cert_label}
+OCENA: {cert_label}{sources_section}
+
+WAZNE: Jezeli FAKTY ZGODNE zawieraja konkretna odpowiedz z internetu (aktualna data, kurs, wynik meczu, cena) — uzyj jej jako glownego faktu. Modele offline sa kontekstem, nie zrodlem. Nie pisz o ograniczeniach modeli jezeli fakty z internetu odpowiadaja na pytanie.
 
 Napisz odpowiedz dla ucznia lub mlodej osoby ktora chce szybko zrozumiec temat.
 
@@ -317,10 +385,9 @@ Zasady:
 4. Jezeli sa sprzecznosci miedzy modelami: powiedz o tym wprost, krotko.
 5. Ostatni akapit: co z tego wynika praktycznie dla tej osoby.
 6. Ton: starszy brat lub siostra. Cieplo, bez pouczania, bez szkolnego jezyka.
-7. Jezeli pytanie nie ma zwiazku ze szkola (np. kursy walut, aktualnosci) — nie wspominaj o sprawdzianie ani podreczniku.
+7. Jezeli pytanie nie ma zwiazku ze szkola — nie wspominaj o sprawdzianie ani podreczniku.
 
-KRYTYCZNA ZASADA dla sekcji gdzie opisujesz mechanizm:
-Jezeli PEWNOSC = POTWIERDZONE ONLINE lub WYSOKA: opisz TYLKO jak to dziala. Zero watpliwosci w tym miejscu.
+Jezeli PEWNOSC = POTWIERDZONE ONLINE lub WYSOKA: opisz TYLKO jak to dziala. Zero watpliwosci.
 Jezeli PEWNOSC = SREDNIA lub NISKA: mozesz powiedziec ze nie wszyscy sie zgadzaja."""
 
     else:
@@ -330,7 +397,9 @@ PEWNOSC: {cert} — {reason}
 FAKTY ZGODNE: {facts}
 SPRZECZNOSCI: {contras}
 NIEPEWNE: {uncertain}
-OCENA: {cert_label}
+OCENA: {cert_label}{sources_section}
+
+WAZNE: Jezeli FAKTY ZGODNE zawieraja konkretna odpowiedz z internetu (aktualna data, kurs, wynik meczu, cena) — uzyj jej jako glownego faktu. Modele offline sa kontekstem, nie zrodlem. Nie pisz o ograniczeniach modeli jezeli fakty z internetu odpowiadaja na pytanie.
 
 Napisz odpowiedz dla doroslego ktory chce zrozumiec temat.
 
@@ -339,22 +408,20 @@ Zasady:
 2. Pierwsze zdanie: ocena zaufania.
 3. Sprzecznosci opisz jako roznice perspektyw, nie ukrywaj.
 4. Liczby zawsze z kontekstem.
-5. Uzywaj TYLKO faktow z FAKTY ZGODNE.
-6. Ton: madry znajomy przy kawie. Rzeczowy, bezposredni, cieplo.
-7. Badz szczodry w wyjasnieniach.
+5. Ton: madry znajomy przy kawie. Rzeczowy, bezposredni, cieplo.
 
 Uzyj tych naglowkow:
 
 **SYNTEZA:** [1-2 zdania]
 
 **CO Z TEGO WYNIKA**
-[Konkretna odpowiedz z faktow zgodnych]
+[Konkretna odpowiedz]
 
 **DLACZEGO TAK**
-[Mechanizm przyczynowy]
+[Mechanizm przyczynowy — przy WYSOKA/POTWIERDZONE ONLINE: zero watpliwosci tutaj]
 
 **TWARDE FAKTY**
-[Liczby i przyklady z kontekstem. Jezeli brak: "Modele nie podaly zgodnych danych ilosciowych."]
+[Liczby i przyklady. Jezeli brak: "Modele nie podaly zgodnych danych ilosciowych."]
 
 **CO WIEMY, A CZEGO NIE**
 - pewne: [tezy z co najmniej 2 modeli]
@@ -362,22 +429,25 @@ Uzyj tych naglowkow:
 - niepewne: [sprzecznosci jako roznice perspektyw]
 
 **GDZIE SA GRANICE**
-[Kiedy ta wiedza nie dziala. Co zalezy od kontekstu.]
-
-KRYTYCZNA ZASADA dla sekcji DLACZEGO TAK:
-Jezeli PEWNOSC = POTWIERDZONE ONLINE lub WYSOKA: opisz TYLKO mechanizm lub kontekst faktu. Zero watpliwosci i zastrzezen w tej sekcji.
-Jezeli PEWNOSC = SREDNIA lub NISKA: mozesz opisac roznice i niepewnosci."""
+[Kiedy ta wiedza nie dziala.]"""
 
     try:
         r = claude_client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=2000,
+            temperature=0.2,
             messages=[{"role": "user", "content": prompt}]
         )
         blocks = [b for b in r.content if hasattr(b, 'text') and b.text]
-        return blocks[0].text if blocks else "[SYNTHESIS ERROR] brak tekstu"
+        result = blocks[0].text if blocks else None
+        if not result:
+            return fallback_synthesis(verification, mode)
+        if mode == "uczen":
+            result = strip_markdown(result)
+        return result
     except Exception as e:
-        return f"[SYNTHESIS ERROR] {e}"
+        logger.error(f"[SYNTHESIS] Claude error: {e}", exc_info=True)
+        return fallback_synthesis(verification, mode)
 
 
 # =======================
@@ -452,19 +522,28 @@ def health():
 @app.post("/ask")
 @limiter.limit("10/minute")
 def ask(q: Question, request: Request):
+    if not check_daily_limit():
+        return {"question": q.question, "status": "error", "error": "Dzienny limit zapytań wyczerpany. Spróbuj jutro."}
     try:
         import time
+        from datetime import datetime
+        # Wstrzyknij aktualną datę — modele nie muszą zgadywać
+        current_date = datetime.now().strftime("%A, %d %B %Y")
+        question_with_date = f"[Dzisiaj jest: {current_date}]\n\n{q.question}"
+
+        use_tavily = needs_web_search(q.question) and not q.file_data
+        tavily_r = "[TAVILY: pominiety]"
+
         with ThreadPoolExecutor(max_workers=4) as ex:
             t0 = time.time()
-            fc = ex.submit(ask_claude, q.question, q.file_data, q.file_type)
-            fo = ex.submit(ask_openai, q.question, q.file_data, q.file_type)
-            fg = ex.submit(ask_gemini, q.question, q.file_data, q.file_type)
-            ft = ex.submit(ask_tavily, q.question) if not q.file_data else None
+            fc = ex.submit(ask_claude, question_with_date, q.file_data, q.file_type)
+            fo = ex.submit(ask_openai, question_with_date, q.file_data, q.file_type)
+            fg = ex.submit(ask_gemini, question_with_date, q.file_data, q.file_type)
+            ft = ex.submit(ask_tavily, q.question) if use_tavily else None
 
             claude_r = "[CLAUDE TIMEOUT]"
             openai_r = "[OPENAI TIMEOUT]"
             gemini_r = "[GEMINI TIMEOUT]"
-            tavily_r = "[TAVILY: pominiety — analiza pliku]"
 
             try: claude_r = fc.result(timeout=50 if q.file_data else 30)
             except TimeoutError: pass
@@ -479,7 +558,7 @@ def ask(q: Question, request: Request):
                 try: tavily_r = ft.result(timeout=15)
                 except TimeoutError: pass
 
-            logger.info(f"[MODEL] total={time.time()-t0:.1f}s file={'yes' if q.file_data else 'no'} tavily={'skip' if q.file_data else 'ok'}")
+            logger.info(f"[MODEL] total={time.time()-t0:.1f}s file={'yes' if q.file_data else 'no'} tavily={'yes' if use_tavily else 'skip'}")
 
         def is_error(resp):
             return not resp or any(resp.startswith(p) for p in ["[CLAUDE", "[OPENAI", "[GEMINI", "[TAVILY"]) or "TIMEOUT" in resp
@@ -499,8 +578,8 @@ def ask(q: Question, request: Request):
         
         # Generuj obie syntezy rownolegnie
         with ThreadPoolExecutor(max_workers=2) as ex2:
-            f_ogolny = ex2.submit(render_synthesis, q.question, verification_data, "ogolny")
-            f_uczen = ex2.submit(render_synthesis, q.question, verification_data, "uczen")
+            f_ogolny = ex2.submit(render_synthesis, q.question, verification_data, "ogolny", claude_r, openai_r, gemini_r)
+            f_uczen = ex2.submit(render_synthesis, q.question, verification_data, "uczen", claude_r, openai_r, gemini_r)
             synthesis_ogolny = f_ogolny.result(timeout=60)
             synthesis_uczen = f_uczen.result(timeout=60)
 
