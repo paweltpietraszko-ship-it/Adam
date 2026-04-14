@@ -291,22 +291,22 @@ SPRZECZNOSCI: {contras}
 NIEPEWNE: {uncertain}
 OCENA: {cert_label}
 
-Napisz odpowiedz dla ucznia przygotowujacego sie do sprawdzianu.
+Napisz odpowiedz dla ucznia lub mlodej osoby ktora chce szybko zrozumiec temat.
 
-BEZWZGLEDNY ZAKAZ: nie uzywaj zadnych naglowkow markdown (**, ##, ###), zadnych list punktowanych ani numerowanych. Tylko ciagly tekst podzielony na akapity.
+BEZWZGLEDNY ZAKAZ: nie uzywaj zadnych naglowkow markdown (**, ##, ###), zadnych list punktowanych ani numerowanych. Tylko ciagly tekst podzielony na akapity. Maksymalnie 4 krotkie akapity.
 
 Zasady:
-1. Pierwsze zdanie: ocena zaufania i co uczen ma z tym zrobic.
-2. Jezeli sa sprzecznosci: "Tu modele sie roznia — [opis]. Sprawdz w podreczniku."
-3. Uzywaj TYLKO faktow z FAKTY ZGODNE.
-4. Ton: madry starszy kolega tlumaczacy przed klasowka. Cieplo, konkretnie.
+1. Jezyk prosty — tak jakbys tlumaczyl znajomemu przez telefon. Zadnych slow akademickich.
+2. Pierwsze zdanie: czy mozna temu ufac i dlaczego w jednym zdaniu.
+3. Najwazniejsza informacja w drugim zdaniu — konkretna, bez owijania w bawelne.
+4. Jezeli sa sprzecznosci miedzy modelami: powiedz o tym wprost, krotko.
+5. Ostatni akapit: co z tego wynika praktycznie dla tej osoby.
+6. Ton: starszy brat lub siostra. Cieplo, bez pouczania, bez szkolnego jezyka.
+7. Jezeli pytanie nie ma zwiazku ze szkola (np. kursy walut, aktualnosci) — nie wspominaj o sprawdzianie ani podreczniku.
 
-Napisz 5 akapitow (BEZ naglowkow, BEZ list):
-Akapit 1: Ocena zaufania i instrukcja dla ucznia.
-Akapit 2: Definicja egzaminacyjna z wyjasnieniem mechanizmu.
-Akapit 3: Przyklad ktory moze pojawic sie na sprawdzianie.
-Akapit 4: Typowy blad — jezeli sa sprzecznosci, opisz je jako pulapke.
-Akapit 5: Czego nie trzeba wiedziec do tego sprawdzianu."""
+KRYTYCZNA ZASADA dla sekcji gdzie opisujesz mechanizm:
+Jezeli PEWNOSC = POTWIERDZONE ONLINE lub WYSOKA: opisz TYLKO jak to dziala. Zero watpliwosci w tym miejscu.
+Jezeli PEWNOSC = SREDNIA lub NISKA: mozesz powiedziec ze nie wszyscy sie zgadzaja."""
 
     else:
         prompt = f"""Masz wynik weryfikacji {models_count} modeli AI na pytanie: {question}
