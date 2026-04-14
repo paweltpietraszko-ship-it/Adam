@@ -205,6 +205,9 @@ WYSOKA = co najmniej 2 modele AI zgodne w kluczowych faktach, brak sprzecznosci
 SREDNIA = 2 modele czesciowo zgodne LUB 1 sprzecznosc w szczegolach
 NISKA = modele roznia sie w kluczowych twierdzeniach LUB bledy/timeouty
 
+KLUCZOWA ZASADA: Jezeli model odpowiada ze nie zna aktualnych danych (kurs, cena, pogoda, wyniki na zywo) — jego odpowiedz POMIJASZ przy ocenie pewnosci. Uczciwy brak wiedzy nie jest sprzecznoscia. Liczy sie tylko model ktory podaje konkretna odpowiedz.
+Jezeli Tavily ma konkretne dane liczbowe a modele AI przyznaja brak wiedzy — uzyj danych Tavily jako podstawy i ocen pewnosc na POTWIERDZONE ONLINE jezeli dane sa spojne, SREDNIA jezeli rozne.
+
 Tavily jest TYLKO sygnałem weryfikacyjnym — nie jest zrodlem tresci. Nie cytuj Tavily w facts_aligned.
 Jezeli Tavily jest niedostepny lub pusty: ignoruj go calkowicie.
 
