@@ -37,25 +37,25 @@ function ReportLine({ text }) {
   if (m) {
     if (!m[2].trim()) return (
       <div style={{
-        fontWeight: 600, color: "#5b9bd5", fontSize: 12,
+        fontWeight: 600, color: "#5b9bd5", fontSize: 11,
         letterSpacing: "0.07em", textTransform: "uppercase",
         margin: "20px 0 7px", paddingBottom: 5,
         borderBottom: "1px solid #1a1f26"
       }}>{m[1]}</div>
     );
     return (
-      <div style={{ fontSize: 15, lineHeight: 1.8, color: "#b0b8c4" }}>
+      <div style={{ fontSize: 14, lineHeight: 1.8, color: "#b0b8c4" }}>
         <span style={{ fontWeight: 600, color: "#c8cdd6" }}>{m[1]}</span>{m[2]}
       </div>
     );
   }
   if (text.startsWith("- ")) return (
-    <div style={{ fontSize: 14, lineHeight: 1.7, color: "#8a96a4", paddingLeft: 16, position: "relative" }}>
+    <div style={{ fontSize: 13, lineHeight: 1.7, color: "#8a96a4", paddingLeft: 16, position: "relative" }}>
       <span style={{ position: "absolute", left: 0, color: "#2d4a6e" }}>—</span>
       {text.slice(2)}
     </div>
   );
-  return <div style={{ fontSize: 15, lineHeight: 1.8, color: "#b0b8c4" }}>{text}</div>;
+  return <div style={{ fontSize: 14, lineHeight: 1.8, color: "#b0b8c4" }}>{text}</div>;
 }
 
 const Tag = ({ c, accent }) => (
@@ -75,6 +75,8 @@ function App() {
   const [report, setReport] = useState("");
   const [reportOgolny, setReportOgolny] = useState("");
   const [reportUczen, setReportUczen] = useState("");
+  const [synthLoading, setSynthLoading] = useState(false);
+  const [lastQuestion, setLastQuestion] = useState("");
   const [showSrc, setShowSrc] = useState(false);
   const [err, setErr] = useState("");
   const [timing, setTiming] = useState(null);
@@ -84,11 +86,6 @@ function App() {
   const [mode, setMode] = useState("ogolny");
   const [adamLoading, setAdamLoading] = useState(false);
   const [showDisclaimer, setShowDisclaimer] = useState(() => !localStorage.getItem("triangulum_disclaimer"));
-  const [fileData, setFileData] = useState(null);
-  const [fileName, setFileName] = useState("");
-  const [fileType, setFileType] = useState("");
-  const [fileAction, setFileAction] = useState("Przeanalizuj");
-  const fileRef = useRef(null);
   const timerRef = useRef(null);
   const adamEndRef = useRef(null);
 
@@ -108,27 +105,8 @@ function App() {
     adamEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [adamHistory]);
 
-  async function handleFile(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    const maxSize = 10 * 1024 * 1024;
-    if (file.size > maxSize) { setErr("Plik za duży — maksymalny rozmiar to 10 MB."); return; }
-    const allowed = ["image/jpeg","image/png","image/webp","image/gif","application/pdf"];
-    if (!allowed.includes(file.type)) { setErr("Nieobsługiwany format. Akceptowane: JPG, PNG, WEBP, GIF, PDF."); return; }
-    setErr("");
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const b64 = ev.target.result.split(",")[1];
-      setFileData(b64);
-      setFileName(file.name);
-      setFileType(file.type);
-    };
-    reader.readAsDataURL(file);
-  }
-
   async function run() {
-    const questionText = fileData ? `[${fileAction}] ${q.trim() || fileAction}` : q.trim();
-    if (!questionText) { setErr("Wpisz pytanie."); return; }
+    if (!q.trim()) { setErr("Wpisz pytanie."); return; }
     setErr(""); setSources(null); setReport(""); setReportOgolny(""); setReportUczen("");
     setShowSrc(false); setTiming(null);
     setAdamHistory([]); setAdamInput("");
@@ -136,12 +114,10 @@ function App() {
     const t0 = Date.now();
 
     try {
-      const body = { question: questionText, mode: mode };
-      if (fileData) { body.file_data = fileData; body.file_type = fileType; }
       const res = await fetch(`${BACKEND}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+        body: JSON.stringify({ question: q, mode: mode })
       });
 
       if (!res.ok) throw new Error(`Błąd serwera: ${res.status}`);
@@ -152,10 +128,11 @@ function App() {
       setSources({ a: data.claude || "", b: data.openai || "", c: data.gemini || "", d: data.tavily || "" });
       setVerificationData(data.verification || {});
       const og = data.synthesis || "";
-      const uc = data.synthesis_uczen || data.synthesis || "";
+      const uc = data.synthesis_uczen || "";
       setReportOgolny(og);
       setReportUczen(uc);
-      setReport(mode === "uczen" ? uc : og);
+      setReport(mode === "uczen" ? (uc || og) : (og || uc));
+      setLastQuestion(q);
       setTiming(((Date.now() - t0) / 1000).toFixed(1));
       setStage("done");
     } catch (e) {
@@ -190,7 +167,7 @@ function App() {
   const sans = "'IBM Plex Sans', sans-serif";
 
   return (
-    <div style={{ minHeight: "100vh", background: "#0a0c0f", color: "#c8cdd6", fontFamily: sans, padding: "32px 24px" }}>
+    <div style={{ minHeight: "100vh", background: "#0a0c0f", color: "#c8cdd6", fontFamily: sans, padding: "28px 18px" }}>
 
       {showDisclaimer && (
         <div style={{
@@ -223,88 +200,67 @@ function App() {
           </div>
         </div>
       )}
-      <div style={{ maxWidth: 860, margin: "0 auto" }}>
+      <div style={{ maxWidth: 680, margin: "0 auto" }}>
 
         {/* Header */}
         <div style={{ marginBottom: 30, borderBottom: "1px solid #1a1f26", paddingBottom: 18 }}>
-          <div style={{ fontFamily: mono, fontSize: 10, letterSpacing: "0.2em", color: "#2d4a6e", textTransform: "uppercase", marginBottom: 4 }}>
+          <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.2em", color: "#2d4a6e", textTransform: "uppercase", marginBottom: 4 }}>
             System Weryfikacji Multi-Model
           </div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 24, fontWeight: 300, color: "#e0e6ee", letterSpacing: "-0.02em" }}>
-              <img src="icon-192.png" style={{ width: 26, height: 26, marginRight: 8, verticalAlign: "middle", borderRadius: 4 }} />Triangulum <span style={{ fontWeight: 600, color: "#5b9bd5" }}>v3.2</span>
+            <span style={{ fontSize: 20, fontWeight: 300, color: "#e0e6ee", letterSpacing: "-0.02em" }}>
+              <img src="icon-192.png" style={{ width: 22, height: 22, marginRight: 6, verticalAlign: "middle", borderRadius: 4 }} />Triangulum <span style={{ fontWeight: 600, color: "#5b9bd5" }}>v3.2</span>
             </span>
             <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "#0f1419", padding: 2, borderRadius: 4, border: "1px solid #1a1f26" }}>
-              <button onClick={() => { setMode("ogolny"); if (reportOgolny) setReport(reportOgolny); }} style={{ padding: "4px 12px", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "ogolny" ? "#1e3a5f" : "transparent", color: mode === "ogolny" ? "#5b9bd5" : "#5a6270", cursor: "pointer" }}>OGÓLNY</button>
-              <button onClick={() => { setMode("uczen"); if (reportUczen) setReport(reportUczen); }} style={{ padding: "4px 12px", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "uczen" ? "#1e3a5f" : "transparent", color: mode === "uczen" ? "#5b9bd5" : "#5a6270", cursor: "pointer" }}>UCZEŃ</button>
+              <button onClick={async () => {
+                setMode("ogolny");
+                if (reportOgolny) { setReport(reportOgolny); return; }
+                if (stage !== "done" || !lastQuestion) return;
+                setSynthLoading(true);
+                try {
+                  const res = await fetch(`${BACKEND}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: lastQuestion, mode: "ogolny" }) });
+                  const data = await res.json();
+                  const og = data.synthesis || "";
+                  setReportOgolny(og); setReport(og);
+                } catch(e) {} finally { setSynthLoading(false); }
+              }} style={{ padding: "4px 12px", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "ogolny" ? "#1e3a5f" : "transparent", color: mode === "ogolny" ? "#5b9bd5" : "#5a6270", cursor: "pointer" }}>OGÓLNY</button>
+              <button onClick={async () => {
+                setMode("uczen");
+                if (reportUczen) { setReport(reportUczen); return; }
+                if (stage !== "done" || !lastQuestion) return;
+                setSynthLoading(true);
+                try {
+                  const res = await fetch(`${BACKEND}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: lastQuestion, mode: "uczen" }) });
+                  const data = await res.json();
+                  const uc = data.synthesis || "";
+                  setReportUczen(uc); setReport(uc);
+                } catch(e) {} finally { setSynthLoading(false); }
+              }} style={{ padding: "4px 12px", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "uczen" ? "#1e3a5f" : "transparent", color: mode === "uczen" ? "#5b9bd5" : "#5a6270", cursor: "pointer" }}>UCZEŃ</button>
             </div>
-            <span style={{ fontFamily: mono, fontSize: 10, color: "#1e3a5a", letterSpacing: "0.08em" }}>
-              CLAUDE · GPT-4O-MINI · GEMINI · TAVILY · ADAM
+            <span style={{ fontFamily: mono, fontSize: 9, color: "#1e3a5a", letterSpacing: "0.08em" }}>
+              CLAUDE · GPT-4O-MINI · GEMINI · ADAM
             </span>
           </div>
         </div>
 
         {/* Question */}
         <div style={{ marginBottom: 14 }}>
-          <label style={{ display: "block", fontFamily: mono, fontSize: 11, letterSpacing: "0.16em", color: "#2d4a6e", textTransform: "uppercase", marginBottom: 8 }}>
+          <label style={{ display: "block", fontFamily: mono, fontSize: 9, letterSpacing: "0.16em", color: "#2d4a6e", textTransform: "uppercase", marginBottom: 6 }}>
             Pytanie
           </label>
           <textarea
             placeholder="Wpisz pytanie do analizy..."
-            value={q} onChange={e => setQ(e.target.value)} rows={4}
+            value={q} onChange={e => setQ(e.target.value)} rows={3}
             onKeyDown={e => { if (e.key === "Enter" && e.ctrlKey) run(); }}
             style={{
               width: "100%", background: "#0d1015", border: "1px solid #1a1f26",
-              color: "#c8cdd6", fontFamily: sans, fontSize: 16,
-              padding: "14px 16px", borderRadius: 3, resize: "vertical", lineHeight: 1.6
+              color: "#c8cdd6", fontFamily: sans, fontSize: 15,
+              padding: "12px 14px", borderRadius: 3, resize: "vertical", lineHeight: 1.5
             }}
           />
-          <div style={{ fontFamily: mono, fontSize: 10, color: "#1a2535", marginTop: 4, letterSpacing: "0.06em" }}>
+          <div style={{ fontFamily: mono, fontSize: 9, color: "#1a2535", marginTop: 4, letterSpacing: "0.06em" }}>
             Ctrl+Enter aby uruchomić
           </div>
-        </div>
-
-        {/* File upload */}
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ display: "block", fontFamily: mono, fontSize: 11, letterSpacing: "0.16em", color: "#2d4a6e", textTransform: "uppercase", marginBottom: 8 }}>
-            Plik (opcjonalnie)
-          </label>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <button onClick={() => fileRef.current.click()} style={{
-              background: "#0d1015", border: "1px solid #1a2535", color: "#5a6270",
-              fontFamily: mono, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase",
-              padding: "8px 14px", borderRadius: 3, cursor: "pointer"
-            }}>
-              ▸ Dodaj plik
-            </button>
-            <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.pdf" onChange={handleFile} style={{ display: "none" }} />
-            {fileName && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontFamily: mono, fontSize: 10, color: "#5b9bd5" }}>{fileName}</span>
-                <button onClick={() => { setFileData(null); setFileName(""); setFileType(""); fileRef.current.value = ""; }} style={{
-                  background: "none", border: "none", color: "#3a1515", cursor: "pointer", fontSize: 14, lineHeight: 1
-                }}>✕</button>
-              </div>
-            )}
-            {!fileName && <span style={{ fontFamily: mono, fontSize: 10, color: "#1e3a5a" }}>JPG · PNG · WEBP · GIF · PDF · max 10 MB</span>}
-          </div>
-
-          {fileName && (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ fontFamily: mono, fontSize: 10, color: "#2d4a6e", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>Co zrobić z plikiem?</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {["Przeanalizuj", "Rozwiąż zadanie", "Streść", "Znajdź błędy", "Wyjaśnij"].map(a => (
-                  <button key={a} onClick={() => setFileAction(a)} style={{
-                    padding: "5px 12px", fontSize: 11, fontFamily: mono, borderRadius: 3,
-                    border: `1px solid ${fileAction === a ? "#2d4a6e" : "#1a2535"}`,
-                    background: fileAction === a ? "#0c1a28" : "transparent",
-                    color: fileAction === a ? "#5b9bd5" : "#3a4a5a",
-                    cursor: "pointer"
-                  }}>{a}</button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Button */}
@@ -364,6 +320,12 @@ function App() {
         )}
 
         {/* Report */}
+        {synthLoading && (
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#3a6a8a", padding: "10px 0", letterSpacing: "0.04em" }}>
+            ▸ Generuję drugi tryb...
+          </div>
+        )}
+
         {stage === "done" && report && (
           <div>
             <div style={{
@@ -377,13 +339,14 @@ function App() {
                 marginTop: 20, paddingTop: 14, borderTop: "1px solid #1a1f26"
               }}>
                 <Tag c={(() => {
+                  if (verificationData && verificationData.certainty === "SZYBKA") return "1 źródło";
                   let count = 2;
                   if (sources && sources.c && !sources.c.startsWith("[GEMINI")) count++;
-                  if (sources && sources.d && !sources.d.startsWith("[TAVILY")) count++;
                   return `${count} źródła`;
                 })()} />
                   {verificationData && verificationData.certainty && (
                     <Tag c={
+                      verificationData.certainty === "SZYBKA" ? "⚡ szybka odpowiedź" :
                       verificationData.certainty === "POTWIERDZONE ONLINE" ? "✓ potwierdzone online" :
                       verificationData.certainty === "WYSOKA" ? "✓ zgodne" :
                       verificationData.certainty === "SREDNIA" ? "⚠ częściowe różnice" :
@@ -398,7 +361,7 @@ function App() {
                       ? "\n\n---\nROZMOWA Z ADAMEM\n" + adamHistory.map(m => (m.role === "user" ? "TY: " : "ADAM: ") + m.content).join("\n\n")
                       : "";
                     const src = sources
-                      ? "\n\n---\nCLAUDE:\n" + sources.a + "\n\nGPT-4O-MINI:\n" + sources.b + (sources.c && !sources.c.startsWith("[GEMINI") ? "\n\nGEMINI:\n" + sources.c : "") + (sources.d && !sources.d.startsWith("[TAVILY") ? "\n\nTAVILY:\n" + sources.d : "")
+                      ? "\n\n---\nCLAUDE:\n" + sources.a + "\n\nGPT-4O-MINI:\n" + sources.b + (sources.c && !sources.c.startsWith("[GEMINI") ? "\n\nGEMINI:\n" + sources.c : "")
                       : "";
                     const txt = "PYTANIE: " + q + "\n\n" + report + adamTxt + src;
                     const a = document.createElement("a");
@@ -425,12 +388,11 @@ function App() {
 
             {/* Sources */}
             {showSrc && sources && (
-              <div style={{ display: "grid", gridTemplateColumns: `repeat(${[sources.a, sources.b, sources.c && !sources.c.startsWith("[GEMINI"), sources.d && !sources.d.startsWith("[TAVILY")].filter(Boolean).length}, 1fr)`, gap: 8, marginTop: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${[sources.a, sources.b, sources.c && !sources.c.startsWith("[GEMINI")].filter(Boolean).length}, 1fr)`, gap: 8, marginTop: 10 }}>
                 {[
                 { name: "Claude", text: sources.a },
                 { name: "GPT-4o-mini", text: sources.b },
-                sources.c && !sources.c.startsWith("[GEMINI") ? { name: "Gemini", text: sources.c } : null,
-                sources.d && !sources.d.startsWith("[TAVILY") ? { name: "Tavily (web)", text: sources.d } : null
+                sources.c && !sources.c.startsWith("[GEMINI") ? { name: "Gemini", text: sources.c } : null
               ].filter(Boolean).map(s => (
                   <div key={s.name} style={{
                     background: "#080b0e", border: "1px solid #1a1f26",
