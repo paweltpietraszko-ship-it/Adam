@@ -10,20 +10,20 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-textarea:focus, input:focus { outline: none; border-color: #2d4a6e !important; }
+textarea:focus, input:focus { outline: none; border-color: #4a7ab5 !important; }
 ::-webkit-scrollbar { width: 3px; }
-::-webkit-scrollbar-thumb { background: #1e2329; border-radius: 2px; }
+::-webkit-scrollbar-thumb { background: #4a5a6a; border-radius: 2px; }
 </style>
 
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0a0c0f">
+<meta name="theme-color" content="#111820">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Triangulum">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 
 </head>
-<body style="background:#0a0c0f">
+<body style="background:#111820">
 <div id="root"></div>
 
 <script type="text/babel">
@@ -37,32 +37,32 @@ function ReportLine({ text }) {
   if (m) {
     if (!m[2].trim()) return (
       <div style={{
-        fontWeight: 600, color: "#5b9bd5", fontSize: 11,
+        fontWeight: 600, color: "#7ab5e8", fontSize: 11,
         letterSpacing: "0.07em", textTransform: "uppercase",
         margin: "20px 0 7px", paddingBottom: 5,
-        borderBottom: "1px solid #1a1f26"
+        borderBottom: "1px solid #2a3545"
       }}>{m[1]}</div>
     );
     return (
-      <div style={{ fontSize: 14, lineHeight: 1.8, color: "#b0b8c4" }}>
-        <span style={{ fontWeight: 600, color: "#c8cdd6" }}>{m[1]}</span>{m[2]}
+      <div style={{ fontSize: 14, lineHeight: 1.8, color: "#c8d4e0" }}>
+        <span style={{ fontWeight: 600, color: "#dde4ed" }}>{m[1]}</span>{m[2]}
       </div>
     );
   }
   if (text.startsWith("- ")) return (
-    <div style={{ fontSize: 13, lineHeight: 1.7, color: "#8a96a4", paddingLeft: 16, position: "relative" }}>
-      <span style={{ position: "absolute", left: 0, color: "#2d4a6e" }}>—</span>
+    <div style={{ fontSize: 13, lineHeight: 1.7, color: "#a0aab8", paddingLeft: 16, position: "relative" }}>
+      <span style={{ position: "absolute", left: 0, color: "#4a7ab5" }}>—</span>
       {text.slice(2)}
     </div>
   );
-  return <div style={{ fontSize: 14, lineHeight: 1.8, color: "#b0b8c4" }}>{text}</div>;
+  return <div style={{ fontSize: 14, lineHeight: 1.8, color: "#c8d4e0" }}>{text}</div>;
 }
 
 const Tag = ({ c, accent }) => (
   <span style={{
     fontFamily: "monospace", fontSize: 9, letterSpacing: "0.1em",
-    textTransform: "uppercase", color: accent ? "#5b9bd5" : "#2d4a6e",
-    padding: "3px 7px", border: `1px solid ${accent ? "#2d4a6e" : "#1a2535"}`,
+    textTransform: "uppercase", color: accent ? "#7ab5e8" : "#4a7ab5",
+    padding: "3px 7px", border: `1px solid ${accent ? "#4a7ab5" : "#2a3a50"}`,
     borderRadius: 2
   }}>{c}</span>
 );
@@ -167,7 +167,7 @@ function App() {
   const sans = "'IBM Plex Sans', sans-serif";
 
   return (
-    <div style={{ minHeight: "100vh", background: "#0a0c0f", color: "#c8cdd6", fontFamily: sans, padding: "28px 18px" }}>
+    <div style={{ minHeight: "100vh", background: "#111820", color: "#d8dfe8", fontFamily: sans, padding: "28px 18px" }}>
 
       {showDisclaimer && (
         <div style={{
@@ -176,13 +176,13 @@ function App() {
           zIndex: 1000, padding: 24
         }}>
           <div style={{
-            background: "#0d1015", border: "1px solid #2d4a6e",
+            background: "#161e28", border: "1px solid #4a7ab5",
             borderRadius: 6, padding: "28px 30px", maxWidth: 480, width: "100%"
           }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, letterSpacing: "0.2em", color: "#2d4a6e", textTransform: "uppercase", marginBottom: 14 }}>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, letterSpacing: "0.2em", color: "#4a7ab5", textTransform: "uppercase", marginBottom: 14 }}>
               Zanim zaczniesz
             </div>
-            <div style={{ fontSize: 14, lineHeight: 1.8, color: "#b0b8c4", marginBottom: 24 }}>
+            <div style={{ fontSize: 14, lineHeight: 1.8, color: "#c8d4e0", marginBottom: 24 }}>
               Triangulum porównuje odpowiedzi kilku modeli AI i ocenia ich zgodność. Wyższa zgodność oznacza mniejsze ryzyko błędu — nie gwarancję prawdy. Przy ważnych decyzjach traktuj wynik jako punkt wyjścia, nie ostateczną odpowiedź.
             </div>
             <button onClick={() => {
@@ -190,8 +190,8 @@ function App() {
               setShowDisclaimer(false);
             }} style={{
               width: "100%", padding: "12px", borderRadius: 3,
-              background: "#0c1a28", border: "1px solid #2d4a6e",
-              color: "#5b9bd5", fontFamily: "'IBM Plex Mono', monospace",
+              background: "#0c1a28", border: "1px solid #4a7ab5",
+              color: "#7ab5e8", fontFamily: "'IBM Plex Mono', monospace",
               fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase",
               cursor: "pointer"
             }}>
@@ -203,15 +203,15 @@ function App() {
       <div style={{ maxWidth: 680, margin: "0 auto" }}>
 
         {/* Header */}
-        <div style={{ marginBottom: 30, borderBottom: "1px solid #1a1f26", paddingBottom: 18 }}>
-          <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.2em", color: "#2d4a6e", textTransform: "uppercase", marginBottom: 4 }}>
+        <div style={{ marginBottom: 30, borderBottom: "1px solid #2a3545", paddingBottom: 18 }}>
+          <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.2em", color: "#4a7ab5", textTransform: "uppercase", marginBottom: 4 }}>
             System Weryfikacji Multi-Model
           </div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 20, fontWeight: 300, color: "#e0e6ee", letterSpacing: "-0.02em" }}>
-              <img src="icon-192.png" style={{ width: 22, height: 22, marginRight: 6, verticalAlign: "middle", borderRadius: 4 }} />Triangulum <span style={{ fontWeight: 600, color: "#5b9bd5" }}>v3.2</span>
+            <span style={{ fontSize: 20, fontWeight: 300, color: "#edf2f8", letterSpacing: "-0.02em" }}>
+              <img src="icon-192.png" style={{ width: 22, height: 22, marginRight: 6, verticalAlign: "middle", borderRadius: 4 }} />Triangulum <span style={{ fontWeight: 600, color: "#7ab5e8" }}>v3.2</span>
             </span>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "#0f1419", padding: 2, borderRadius: 4, border: "1px solid #1a1f26" }}>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "#0f1419", padding: 2, borderRadius: 4, border: "1px solid #2a3545" }}>
               <button onClick={async () => {
                 setMode("ogolny");
                 if (reportOgolny) { setReport(reportOgolny); return; }
@@ -223,7 +223,7 @@ function App() {
                   const og = data.synthesis || "";
                   setReportOgolny(og); setReport(og);
                 } catch(e) {} finally { setSynthLoading(false); }
-              }} style={{ padding: "4px 12px", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "ogolny" ? "#1e3a5f" : "transparent", color: mode === "ogolny" ? "#5b9bd5" : "#5a6270", cursor: "pointer" }}>OGÓLNY</button>
+              }} style={{ padding: "4px 12px", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "ogolny" ? "#2a5080" : "transparent", color: mode === "ogolny" ? "#7ab5e8" : "#7a8290", cursor: "pointer" }}>OGÓLNY</button>
               <button onClick={async () => {
                 setMode("uczen");
                 if (reportUczen) { setReport(reportUczen); return; }
@@ -235,9 +235,9 @@ function App() {
                   const uc = data.synthesis || "";
                   setReportUczen(uc); setReport(uc);
                 } catch(e) {} finally { setSynthLoading(false); }
-              }} style={{ padding: "4px 12px", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "uczen" ? "#1e3a5f" : "transparent", color: mode === "uczen" ? "#5b9bd5" : "#5a6270", cursor: "pointer" }}>UCZEŃ</button>
+              }} style={{ padding: "4px 12px", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "uczen" ? "#2a5080" : "transparent", color: mode === "uczen" ? "#7ab5e8" : "#7a8290", cursor: "pointer" }}>UCZEŃ</button>
             </div>
-            <span style={{ fontFamily: mono, fontSize: 9, color: "#1e3a5a", letterSpacing: "0.08em" }}>
+            <span style={{ fontFamily: mono, fontSize: 9, color: "#2a5070", letterSpacing: "0.08em" }}>
               CLAUDE · GPT-4O-MINI · GEMINI · ADAM
             </span>
           </div>
@@ -245,7 +245,7 @@ function App() {
 
         {/* Question */}
         <div style={{ marginBottom: 14 }}>
-          <label style={{ display: "block", fontFamily: mono, fontSize: 9, letterSpacing: "0.16em", color: "#2d4a6e", textTransform: "uppercase", marginBottom: 6 }}>
+          <label style={{ display: "block", fontFamily: mono, fontSize: 9, letterSpacing: "0.16em", color: "#4a7ab5", textTransform: "uppercase", marginBottom: 6 }}>
             Pytanie
           </label>
           <textarea
@@ -253,12 +253,12 @@ function App() {
             value={q} onChange={e => setQ(e.target.value)} rows={3}
             onKeyDown={e => { if (e.key === "Enter" && e.ctrlKey) run(); }}
             style={{
-              width: "100%", background: "#0d1015", border: "1px solid #1a1f26",
-              color: "#c8cdd6", fontFamily: sans, fontSize: 15,
+              width: "100%", background: "#161e28", border: "1px solid #2a3545",
+              color: "#dde4ed", fontFamily: sans, fontSize: 15,
               padding: "12px 14px", borderRadius: 3, resize: "vertical", lineHeight: 1.5
             }}
           />
-          <div style={{ fontFamily: mono, fontSize: 9, color: "#1a2535", marginTop: 4, letterSpacing: "0.06em" }}>
+          <div style={{ fontFamily: mono, fontSize: 9, color: "#2a3a50", marginTop: 4, letterSpacing: "0.06em" }}>
             Ctrl+Enter aby uruchomić
           </div>
         </div>
@@ -267,9 +267,9 @@ function App() {
         <button onClick={run} disabled={running} style={{
           width: "100%", padding: "14px", borderRadius: 3,
           cursor: running ? "not-allowed" : "pointer",
-          background: running ? "#0a0f15" : "#0c1a28",
-          border: `1px solid ${running ? "#1a2535" : "#2d4a6e"}`,
-          color: running ? "#1e3a5a" : "#5b9bd5",
+          background: running ? "#2a3a50" : "#0c1a28",
+          border: `1px solid ${running ? "#2a3a50" : "#4a7ab5"}`,
+          color: running ? "#2a5070" : "#7ab5e8",
           fontFamily: mono, fontSize: 10, letterSpacing: "0.2em",
           textTransform: "uppercase", transition: "all 0.15s", marginBottom: 22
         }}>
@@ -279,12 +279,12 @@ function App() {
         {/* Progress */}
         {running && (
           <div style={{
-            background: "#0d1015", border: "1px solid #1a1f26",
+            background: "#161e28", border: "1px solid #2a3545",
             borderRadius: 3, marginBottom: 16, overflow: "hidden"
           }}>
-            <div style={{ height: 2, background: "#0a0c0f" }}>
+            <div style={{ height: 2, background: "#111820" }}>
               <div style={{
-                height: "100%", background: "linear-gradient(90deg, #1e3a5f, #5b9bd5)",
+                height: "100%", background: "linear-gradient(90deg, #2a5080, #7ab5e8)",
                 borderRadius: 1, width: `${Math.min(95, elapsed * 4)}%`,
                 transition: "width 1s linear"
               }} />
@@ -293,10 +293,10 @@ function App() {
               padding: "8px 14px", display: "flex",
               justifyContent: "space-between", alignItems: "center"
             }}>
-              <div style={{ fontFamily: mono, fontSize: 10, color: "#3a6a8a", letterSpacing: "0.04em" }}>
+              <div style={{ fontFamily: mono, fontSize: 10, color: "#5a8aaa", letterSpacing: "0.04em" }}>
                 ▸ Odpytuję modele i tworzę raport...
               </div>
-              <div style={{ fontFamily: mono, fontSize: 10, color: "#2d4a6e" }}>
+              <div style={{ fontFamily: mono, fontSize: 10, color: "#4a7ab5" }}>
                 {elapsed}s
               </div>
             </div>
@@ -321,7 +321,7 @@ function App() {
 
         {/* Report */}
         {synthLoading && (
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#3a6a8a", padding: "10px 0", letterSpacing: "0.04em" }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#5a8aaa", padding: "10px 0", letterSpacing: "0.04em" }}>
             ▸ Generuję drugi tryb...
           </div>
         )}
@@ -329,14 +329,14 @@ function App() {
         {stage === "done" && report && (
           <div>
             <div style={{
-              background: "#0d1015", border: "1px solid #1a1f26",
-              borderLeft: "2px solid #1e3a5f", borderRadius: 4, padding: "24px 26px"
+              background: "#161e28", border: "1px solid #2a3545",
+              borderLeft: "2px solid #2a5080", borderRadius: 4, padding: "24px 26px"
             }}>
               {report.split("\n").map((line, i) => <ReportLine key={i} text={line} />)}
 
               <div style={{
                 display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6,
-                marginTop: 20, paddingTop: 14, borderTop: "1px solid #1a1f26"
+                marginTop: 20, paddingTop: 14, borderTop: "1px solid #2a3545"
               }}>
                 <Tag c={(() => {
                   if (verificationData && verificationData.certainty === "SZYBKA") return "1 źródło";
@@ -369,13 +369,13 @@ function App() {
                     a.download = "silnik_" + ts + ".txt";
                     a.click();
                   }} style={{
-                    background: "none", border: "1px solid #1a2535", color: "#2d4a6e",
+                    background: "none", border: "1px solid #2a3a50", color: "#4a7ab5",
                     fontFamily: mono, fontSize: 9, letterSpacing: "0.1em",
                     textTransform: "uppercase", padding: "3px 10px",
                     cursor: "pointer", borderRadius: 2
                   }}>Eksport</button>
                   <button onClick={() => setShowSrc(!showSrc)} style={{
-                    background: "none", border: "1px solid #1a1f26", color: "#2d4a6e",
+                    background: "none", border: "1px solid #2a3545", color: "#4a7ab5",
                     fontFamily: mono, fontSize: 9, letterSpacing: "0.1em",
                     textTransform: "uppercase", padding: "3px 10px",
                     cursor: "pointer", borderRadius: 2
@@ -395,13 +395,13 @@ function App() {
                 sources.c && !sources.c.startsWith("[GEMINI") ? { name: "Gemini", text: sources.c } : null
               ].filter(Boolean).map(s => (
                   <div key={s.name} style={{
-                    background: "#080b0e", border: "1px solid #1a1f26",
+                    background: "#131b26", border: "1px solid #2a3545",
                     borderRadius: 3, padding: "13px 14px"
                   }}>
-                    <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase", color: "#2d4a6e", marginBottom: 8 }}>
+                    <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase", color: "#4a7ab5", marginBottom: 8 }}>
                       {s.name}
                     </div>
-                    <div style={{ fontSize: 11, lineHeight: 1.65, color: "#4a5560" }}>{s.text}</div>
+                    <div style={{ fontSize: 11, lineHeight: 1.65, color: "#8090a0" }}>{s.text}</div>
                   </div>
                 ))}
               </div>
@@ -410,17 +410,17 @@ function App() {
             {/* ADAM */}
             <div style={{ marginTop: 16 }}>
               <div style={{
-                background: "#080b0e", border: "1px solid #1a1f26",
-                borderLeft: "2px solid #2d4a6e", borderRadius: 4
+                background: "#131b26", border: "1px solid #2a3545",
+                borderLeft: "2px solid #4a7ab5", borderRadius: 4
               }}>
                 <div style={{
-                  padding: "12px 18px", borderBottom: "1px solid #1a1f26",
+                  padding: "12px 18px", borderBottom: "1px solid #2a3545",
                   display: "flex", alignItems: "center", gap: 8
                 }}>
-                  <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.2em", textTransform: "uppercase", color: "#5b9bd5" }}>
+                  <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.2em", textTransform: "uppercase", color: "#7ab5e8" }}>
                     ADAM
                   </div>
-                  <div style={{ fontFamily: mono, fontSize: 9, color: "#1e3a5a", letterSpacing: "0.06em" }}>
+                  <div style={{ fontFamily: mono, fontSize: 9, color: "#2a5070", letterSpacing: "0.06em" }}>
                     pogłęb temat · zapytaj o szczegóły
                   </div>
                 </div>
@@ -432,15 +432,15 @@ function App() {
                         <div style={{
                           fontSize: 9, fontFamily: mono, letterSpacing: "0.1em",
                           textTransform: "uppercase",
-                          color: msg.role === "user" ? "#2d4a6e" : "#3a6a4a",
+                          color: msg.role === "user" ? "#4a7ab5" : "#4a8a5a",
                           marginBottom: 4
                         }}>
                           {msg.role === "user" ? "Ty" : "Adam"}
                         </div>
                         <div style={{
                           fontSize: 13, lineHeight: 1.7,
-                          color: msg.role === "user" ? "#8a96a4" : "#b0b8c4",
-                          background: msg.role === "user" ? "#0a0f15" : "transparent",
+                          color: msg.role === "user" ? "#a0aab8" : "#c8d4e0",
+                          background: msg.role === "user" ? "#2a3a50" : "transparent",
                           padding: msg.role === "user" ? "8px 12px" : "0",
                           borderRadius: 3
                         }}>
@@ -449,7 +449,7 @@ function App() {
                       </div>
                     ))}
                     {adamLoading && (
-                      <div style={{ fontFamily: mono, fontSize: 10, color: "#2d4a6e", letterSpacing: "0.06em" }}>
+                      <div style={{ fontFamily: mono, fontSize: 10, color: "#4a7ab5", letterSpacing: "0.06em" }}>
                         Adam pisze...
                       </div>
                     )}
@@ -459,7 +459,7 @@ function App() {
 
                 <div style={{
                   padding: "12px 18px",
-                  borderTop: adamHistory.length > 0 ? "1px solid #1a1f26" : "none",
+                  borderTop: adamHistory.length > 0 ? "1px solid #2a3545" : "none",
                   display: "flex", gap: 8
                 }}>
                   <input
@@ -469,14 +469,14 @@ function App() {
                     onChange={e => setAdamInput(e.target.value)}
                     onKeyDown={e => { if (e.key === "Enter") askAdam(); }}
                     style={{
-                      flex: 1, background: "#0d1015", border: "1px solid #1a1f26",
-                      color: "#c8cdd6", fontFamily: sans, fontSize: 14,
+                      flex: 1, background: "#161e28", border: "1px solid #2a3545",
+                      color: "#dde4ed", fontFamily: sans, fontSize: 14,
                       padding: "10px 12px", borderRadius: 3
                     }}
                   />
                   <button onClick={askAdam} disabled={adamLoading || !adamInput.trim()} style={{
-                    background: "#0c1a28", border: "1px solid #2d4a6e",
-                    color: "#5b9bd5", fontFamily: mono, fontSize: 10,
+                    background: "#0c1a28", border: "1px solid #4a7ab5",
+                    color: "#7ab5e8", fontFamily: mono, fontSize: 10,
                     letterSpacing: "0.15em", textTransform: "uppercase",
                     padding: "10px 14px", borderRadius: 3, cursor: "pointer",
                     opacity: adamLoading || !adamInput.trim() ? 0.4 : 1,

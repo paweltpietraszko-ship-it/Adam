@@ -127,15 +127,18 @@ def ask_gemini(question: str, use_grounding: bool = False) -> str:
     if not gemini_client:
         return "[GEMINI: brak klucza API]"
     try:
-        config = {}
+        from google.genai import types as genai_types
         if use_grounding:
-            from google.genai import types as genai_types
-            config = {"tools": [genai_types.Tool(google_search=genai_types.GoogleSearch())]}
+            config = genai_types.GenerateContentConfig(
+                tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())]
+            )
+        else:
+            config = None
 
         response = gemini_client.models.generate_content(
             model="gemini-flash-latest",
             contents=question,
-            **config
+            config=config
         )
         text = getattr(response, 'text', None)
         if text is None:
