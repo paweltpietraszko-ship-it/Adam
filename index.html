@@ -125,7 +125,7 @@ function App() {
 
       if (data.status === "error") throw new Error(data.error || "Nieznany błąd");
 
-      setSources({ a: data.claude || "", b: data.openai || "", c: data.gemini || "", d: data.tavily || "" });
+      setSources({ a: data.claude || "", b: data.openai || "", c: data.gemini || "" });
       setVerificationData(data.verification || {});
       const og = data.synthesis || "";
       const uc = data.synthesis_uczen || "";
@@ -237,7 +237,7 @@ function App() {
                 } catch(e) {} finally { setSynthLoading(false); }
               }} style={{ padding: "4px 12px", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "uczen" ? "#2a5080" : "transparent", color: mode === "uczen" ? "#7ab5e8" : "#7a8290", cursor: "pointer" }}>UCZEŃ</button>
             </div>
-            <span style={{ fontFamily: mono, fontSize: 9, color: "#2a5070", letterSpacing: "0.08em" }}>
+            <span style={{ fontFamily: mono, fontSize: 9, color: "#4a7ab5", letterSpacing: "0.08em" }}>
               CLAUDE · GPT-4O-MINI · GEMINI · ADAM
             </span>
           </div>
@@ -258,7 +258,7 @@ function App() {
               padding: "12px 14px", borderRadius: 3, resize: "vertical", lineHeight: 1.5
             }}
           />
-          <div style={{ fontFamily: mono, fontSize: 9, color: "#2a3a50", marginTop: 4, letterSpacing: "0.06em" }}>
+          <div style={{ fontFamily: mono, fontSize: 9, color: "#4a5a6a", marginTop: 4, letterSpacing: "0.06em" }}>
             Ctrl+Enter aby uruchomić
           </div>
         </div>
@@ -420,7 +420,7 @@ function App() {
                   <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.2em", textTransform: "uppercase", color: "#7ab5e8" }}>
                     ADAM
                   </div>
-                  <div style={{ fontFamily: mono, fontSize: 9, color: "#2a5070", letterSpacing: "0.06em" }}>
+                  <div style={{ fontFamily: mono, fontSize: 9, color: "#4a7ab5", letterSpacing: "0.06em" }}>
                     pogłęb temat · zapytaj o szczegóły
                   </div>
                 </div>
