@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Triangulum</title>
+<!--
+Zmiany vs poprzednia wersja (index-8.html):
+1. BACKEND = window.location.origin — nie trzeba edytować przy zmianie platformy
+2. Etykiety certainty wczytywane z /config — jedno źródło prawdy
+3. Upload: osobne pole attached_text wysyłane do /ask; backend sandboxuje
+4. Progress: fazy symulowane w JS z komunikatami postępu
+5. Tag dla CERT_SINGLE i CERT_QUICK — uczciwsze oznaczenia
+6. Licznik znaków pytania (limit 10000)
+7. Obsługa 429 (budget/rate limit) z czytelnym komunikatem
+8. switchMode: jedna funkcja zamiast dwóch inline handlerów
+-->
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -14,14 +25,12 @@ textarea:focus, input:focus { outline: none; border-color: #4a7ab5 !important; }
 ::-webkit-scrollbar { width: 3px; }
 ::-webkit-scrollbar-thumb { background: #4a5a6a; border-radius: 2px; }
 </style>
-
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#111820">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Triangulum">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-
 </head>
 <body style="background:#111820">
 <div id="root"></div>
@@ -29,7 +38,40 @@ textarea:focus, input:focus { outline: none; border-color: #4a7ab5 !important; }
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
-const BACKEND = "https://adam-production-89ef.up.railway.app";
+const BACKEND = window.location.origin;
+
+const DEFAULT_LABELS = {
+  quick: "TYLKO CLAUDE — BEZ TRIANGULACJI",
+  verified_online: "WSPARTE ŹRÓDŁAMI ONLINE",
+  high: "WYSOKA",
+  medium: "SREDNIA",
+  low: "NISKA",
+  single: "JEDEN MODEL — TRIANGULACJA NIEMOŻLIWA",
+};
+
+const PROGRESS_STAGES = [
+  { at: 0,  text: "Inicjuję zapytania..." },
+  { at: 3,  text: "Modele AI analizują pytanie..." },
+  { at: 15, text: "Porównuję odpowiedzi..." },
+  { at: 22, text: "Składam raport..." },
+  { at: 40, text: "To trwa dłużej — czekam na ostatnie odpowiedzi..." },
+];
+
+function currentStage(elapsed) {
+  let s = PROGRESS_STAGES[0].text;
+  for (const p of PROGRESS_STAGES) { if (elapsed >= p.at) s = p.text; }
+  return s;
+}
+
+function certaintyTag(cert, labels) {
+  if (!cert) return { text: "brak oceny", color: "#4a5a6a" };
+  if (cert === labels.quick) return { text: "⚡ szybka", color: "#5a8aaa" };
+  if (cert === labels.verified_online) return { text: "✓ ze źródłami online", color: "#5ab57a" };
+  if (cert === labels.high) return { text: "✓ zgodne", color: "#5ab57a" };
+  if (cert === labels.medium) return { text: "⚠ częściowe różnice", color: "#b59a5a" };
+  if (cert === labels.single) return { text: "⚠ jeden model", color: "#b59a5a" };
+  return { text: "✕ modele się różnią", color: "#b06060" };
+}
 
 function ReportLine({ text }) {
   if (!text.trim()) return <div style={{ height: 7 }} />;
@@ -58,11 +100,13 @@ function ReportLine({ text }) {
   return <div style={{ fontSize: 14, lineHeight: 1.8, color: "#c8d4e0" }}>{text}</div>;
 }
 
-const Tag = ({ c, accent }) => (
+const Tag = ({ c, color }) => (
   <span style={{
     fontFamily: "monospace", fontSize: 9, letterSpacing: "0.1em",
-    textTransform: "uppercase", color: accent ? "#7ab5e8" : "#4a7ab5",
-    padding: "3px 7px", border: `1px solid ${accent ? "#4a7ab5" : "#2a3a50"}`,
+    textTransform: "uppercase",
+    color: color || "#4a7ab5",
+    padding: "3px 7px",
+    border: `1px solid ${color || "#2a3a50"}`,
     borderRadius: 2
   }}>{c}</span>
 );
@@ -86,10 +130,28 @@ function App() {
   const [mode, setMode] = useState("ogolny");
   const [adamLoading, setAdamLoading] = useState(false);
   const [showDisclaimer, setShowDisclaimer] = useState(() => !localStorage.getItem("triangulum_disclaimer"));
+  const [deepScan, setDeepScan] = useState(false);
+  const [requestId, setRequestId] = useState(null);
+  const [feedback, setFeedback] = useState(null);
+  const [citations, setCitations] = useState([]);
+  const [uploadText, setUploadText] = useState("");
+  const [uploadName, setUploadName] = useState("");
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [labels, setLabels] = useState(DEFAULT_LABELS);
+  const [cacheHit, setCacheHit] = useState(false);
   const timerRef = useRef(null);
   const adamEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const running = stage === "loading";
+
+  // /config przy starcie — pobierz etykiety z backendu
+  useEffect(() => {
+    fetch(`${BACKEND}/config`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data && data.certainty_labels) setLabels(data.certainty_labels); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (running) {
@@ -105,28 +167,88 @@ function App() {
     adamEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [adamHistory]);
 
+  async function handleUpload(file) {
+    if (!file) return;
+    setUploadLoading(true);
+    setUploadName(file.name);
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30000);
+      const res = await fetch(`${BACKEND}/upload`, {
+        method: "POST", body: formData, signal: controller.signal
+      });
+      clearTimeout(timer);
+      const data = await res.json();
+      if (data.error) { setErr(data.error); setUploadName(""); setUploadText(""); }
+      else { setUploadText(data.text || ""); }
+    } catch (e) {
+      setErr(e.name === "AbortError" ? "Upload przekroczył limit czasu (30s)." : "Błąd uploadu: " + e.message);
+      setUploadName(""); setUploadText("");
+    }
+    setUploadLoading(false);
+  }
+
+  async function sendFeedback(rating) {
+    if (!requestId || feedback !== null) return;
+    setFeedback(rating);
+    try {
+      await fetch(`${BACKEND}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: requestId, rating })
+      });
+    } catch (e) {}
+  }
+
   async function run() {
     if (!q.trim()) { setErr("Wpisz pytanie."); return; }
     setErr(""); setSources(null); setReport(""); setReportOgolny(""); setReportUczen("");
-    setShowSrc(false); setTiming(null);
+    setShowSrc(false); setTiming(null); setFeedback(null); setRequestId(null);
+    setCitations([]); setCacheHit(false);
     setAdamHistory([]); setAdamInput("");
     setStage("loading");
     const t0 = Date.now();
 
     try {
+      const body = {
+        question: q,
+        mode,
+        deep_scan: deepScan,
+        attached_text: uploadText || null,
+        attached_name: uploadName || null,
+      };
       const res = await fetch(`${BACKEND}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, mode: mode })
+        body: JSON.stringify(body)
       });
 
+      if (res.status === 429) {
+        const data = await res.json().catch(() => ({}));
+        setErr(data.error || "Limit zapytań osiągnięty. Spróbuj później.");
+        setStage("error");
+        return;
+      }
       if (!res.ok) throw new Error(`Błąd serwera: ${res.status}`);
       const data = await res.json();
 
-      if (data.status === "error") throw new Error(data.error || "Nieznany błąd");
+      if (data.status === "error" && !data.claude && !data.openai && !data.gemini) {
+        throw new Error(data.error || "Nieznany błąd");
+      }
+      if (data.status === "error") setErr((data.error || "") + " — wyniki mogą być niepełne.");
 
-      setSources({ a: data.claude || "", b: data.openai || "", c: data.gemini || "" });
+      setSources({
+        a: data.claude || "",
+        b: data.openai || "",
+        c: data.gemini || "",
+        p: data.perplexity || ""
+      });
       setVerificationData(data.verification || {});
+      setCitations(data.citations || []);
+      setRequestId(data.request_id || null);
+      setCacheHit(!!data.cache_hit);
       const og = data.synthesis || "";
       const uc = data.synthesis_uczen || "";
       setReportOgolny(og);
@@ -148,12 +270,11 @@ function App() {
     setAdamLoading(true);
     const newHistory = [...adamHistory, { role: "user", content: userMsg }];
     setAdamHistory(newHistory);
-
     try {
       const res = await fetch(`${BACKEND}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: userMsg, context: report, verification: verificationData, history: adamHistory, mode: mode })
+        body: JSON.stringify({ question: userMsg, context: report, verification: verificationData, history: adamHistory, mode })
       });
       const data = await res.json();
       setAdamHistory([...newHistory, { role: "assistant", content: data.answer || "[brak odpowiedzi]" }]);
@@ -163,8 +284,40 @@ function App() {
     setAdamLoading(false);
   }
 
+  async function switchMode(newMode) {
+    setMode(newMode);
+    if (newMode === "ogolny" && reportOgolny) { setReport(reportOgolny); return; }
+    if (newMode === "uczen" && reportUczen) { setReport(reportUczen); return; }
+    if (stage !== "done" || !lastQuestion) return;
+    setSynthLoading(true);
+    try {
+      const endpoint = requestId ? `${BACKEND}/resynthesize` : `${BACKEND}/ask`;
+      const body = requestId
+        ? JSON.stringify({ request_id: requestId, mode: newMode })
+        : JSON.stringify({ question: lastQuestion, mode: newMode, deep_scan: deepScan });
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body
+      });
+      const data = await res.json();
+      if (data.status === "error") {
+        setErr(data.error || "Nie udało się przełączyć trybu.");
+      } else {
+        const txt = data.synthesis || "";
+        if (newMode === "ogolny") setReportOgolny(txt); else setReportUczen(txt);
+        setReport(txt);
+      }
+    } catch (e) {
+      setErr("Błąd połączenia: " + e.message);
+    } finally {
+      setSynthLoading(false);
+    }
+  }
+
   const mono = "'IBM Plex Mono', monospace";
   const sans = "'IBM Plex Sans', sans-serif";
+  const certTag = certaintyTag(verificationData && verificationData.certainty, labels);
 
   return (
     <div style={{ minHeight: "100vh", background: "#111820", color: "#d8dfe8", fontFamily: sans, padding: "28px 18px" }}>
@@ -179,7 +332,7 @@ function App() {
             background: "#161e28", border: "1px solid #4a7ab5",
             borderRadius: 6, padding: "28px 30px", maxWidth: 480, width: "100%"
           }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, letterSpacing: "0.2em", color: "#4a7ab5", textTransform: "uppercase", marginBottom: 14 }}>
+            <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.2em", color: "#4a7ab5", textTransform: "uppercase", marginBottom: 14 }}>
               Zanim zaczniesz
             </div>
             <div style={{ fontSize: 14, lineHeight: 1.8, color: "#c8d4e0", marginBottom: 24 }}>
@@ -191,7 +344,7 @@ function App() {
             }} style={{
               width: "100%", padding: "12px", borderRadius: 3,
               background: "#0c1a28", border: "1px solid #4a7ab5",
-              color: "#7ab5e8", fontFamily: "'IBM Plex Mono', monospace",
+              color: "#7ab5e8", fontFamily: mono,
               fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase",
               cursor: "pointer"
             }}>
@@ -200,6 +353,7 @@ function App() {
           </div>
         </div>
       )}
+
       <div style={{ maxWidth: 680, margin: "0 auto" }}>
 
         {/* Header */}
@@ -209,35 +363,15 @@ function App() {
           </div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: 20, fontWeight: 300, color: "#edf2f8", letterSpacing: "-0.02em" }}>
-              <img src="icon-192.png" style={{ width: 22, height: 22, marginRight: 6, verticalAlign: "middle", borderRadius: 4 }} />Triangulum <span style={{ fontWeight: 600, color: "#7ab5e8" }}>v3.2</span>
+              <img src="icon-192.png" style={{ width: 22, height: 22, marginRight: 6, verticalAlign: "middle", borderRadius: 4 }} />Triangulum <span style={{ fontWeight: 600, color: "#7ab5e8" }}>v3.3</span>
             </span>
             <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "#0f1419", padding: 2, borderRadius: 4, border: "1px solid #2a3545" }}>
-              <button onClick={async () => {
-                setMode("ogolny");
-                if (reportOgolny) { setReport(reportOgolny); return; }
-                if (stage !== "done" || !lastQuestion) return;
-                setSynthLoading(true);
-                try {
-                  const res = await fetch(`${BACKEND}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: lastQuestion, mode: "ogolny" }) });
-                  const data = await res.json();
-                  const og = data.synthesis || "";
-                  setReportOgolny(og); setReport(og);
-                } catch(e) {} finally { setSynthLoading(false); }
-              }} style={{ padding: "4px 12px", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "ogolny" ? "#2a5080" : "transparent", color: mode === "ogolny" ? "#7ab5e8" : "#7a8290", cursor: "pointer" }}>OGÓLNY</button>
-              <button onClick={async () => {
-                setMode("uczen");
-                if (reportUczen) { setReport(reportUczen); return; }
-                if (stage !== "done" || !lastQuestion) return;
-                setSynthLoading(true);
-                try {
-                  const res = await fetch(`${BACKEND}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: lastQuestion, mode: "uczen" }) });
-                  const data = await res.json();
-                  const uc = data.synthesis || "";
-                  setReportUczen(uc); setReport(uc);
-                } catch(e) {} finally { setSynthLoading(false); }
-              }} style={{ padding: "4px 12px", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", border: "none", borderRadius: 2, background: mode === "uczen" ? "#2a5080" : "transparent", color: mode === "uczen" ? "#7ab5e8" : "#7a8290", cursor: "pointer" }}>UCZEŃ</button>
+              <button onClick={() => switchMode("ogolny")}
+                style={{ padding: "4px 12px", fontSize: 11, fontFamily: mono, border: "none", borderRadius: 2, background: mode === "ogolny" ? "#2a5080" : "transparent", color: mode === "ogolny" ? "#7ab5e8" : "#7a8290", cursor: "pointer" }}>OGÓLNY</button>
+              <button onClick={() => switchMode("uczen")}
+                style={{ padding: "4px 12px", fontSize: 11, fontFamily: mono, border: "none", borderRadius: 2, background: mode === "uczen" ? "#2a5080" : "transparent", color: mode === "uczen" ? "#7ab5e8" : "#7a8290", cursor: "pointer" }}>UCZEŃ</button>
             </div>
-            <span style={{ fontFamily: mono, fontSize: 9, color: "#4a7ab5", letterSpacing: "0.08em" }}>
+            <span style={{ fontFamily: mono, fontSize: 9, color: "#2a5070", letterSpacing: "0.08em" }}>
               CLAUDE · GPT-4O-MINI · GEMINI · ADAM
             </span>
           </div>
@@ -258,23 +392,65 @@ function App() {
               padding: "12px 14px", borderRadius: 3, resize: "vertical", lineHeight: 1.5
             }}
           />
-          <div style={{ fontFamily: mono, fontSize: 9, color: "#4a5a6a", marginTop: 4, letterSpacing: "0.06em" }}>
-            Ctrl+Enter aby uruchomić
+          <div style={{ fontFamily: mono, fontSize: 9, color: "#4a5a6a", marginTop: 4, letterSpacing: "0.06em", display: "flex", justifyContent: "space-between" }}>
+            <span>Ctrl+Enter aby uruchomić</span>
+            <span style={{ color: q.length > 9500 ? "#b06060" : "#4a5a6a" }}>{q.length} / 10000</span>
           </div>
         </div>
 
-        {/* Button */}
-        <button onClick={run} disabled={running} style={{
-          width: "100%", padding: "14px", borderRadius: 3,
-          cursor: running ? "not-allowed" : "pointer",
-          background: running ? "#2a3a50" : "#0c1a28",
-          border: `1px solid ${running ? "#2a3a50" : "#4a7ab5"}`,
-          color: running ? "#2a5070" : "#7ab5e8",
-          fontFamily: mono, fontSize: 10, letterSpacing: "0.2em",
-          textTransform: "uppercase", transition: "all 0.15s", marginBottom: 22
-        }}>
-          {running ? "▸ Analizuję..." : "▸ Uruchom analizę"}
-        </button>
+        {/* Upload pliku */}
+        <div style={{ marginBottom: 12 }}>
+          <input ref={fileInputRef} type="file" accept=".pdf,.txt,.md" style={{ display: "none" }}
+            onChange={e => handleUpload(e.target.files[0])} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => fileInputRef.current?.click()} disabled={uploadLoading} style={{
+              background: "none", border: "1px solid #2a3545", color: "#4a7ab5",
+              fontFamily: mono, fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase",
+              padding: "5px 12px", borderRadius: 2, cursor: "pointer"
+            }}>
+              {uploadLoading ? "▸ Wczytuję..." : "+ Dodaj plik"}
+            </button>
+            {uploadName && (
+              <span style={{ fontFamily: mono, fontSize: 9, color: "#5a8aaa" }}>
+                📄 {uploadName} ({uploadText.length} znaków)
+              </span>
+            )}
+            {uploadName && (
+              <button onClick={() => { setUploadText(""); setUploadName(""); }} style={{
+                background: "none", border: "none", color: "#4a5a6a",
+                fontFamily: mono, fontSize: 9, cursor: "pointer"
+              }}>✕</button>
+            )}
+          </div>
+          <div style={{ fontFamily: mono, fontSize: 9, color: "#2a3a50", marginTop: 3, letterSpacing: "0.06em" }}>
+            PDF · TXT · MD · max 5MB
+          </div>
+        </div>
+
+        {/* Rentgen toggle + button */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 22, alignItems: "stretch" }}>
+          <button onClick={run} disabled={running} style={{
+            flex: 1, padding: "14px", borderRadius: 3,
+            cursor: running ? "not-allowed" : "pointer",
+            background: running ? "#2a3a50" : "#0c1a28",
+            border: `1px solid ${running ? "#2a3a50" : "#4a7ab5"}`,
+            color: running ? "#2a5070" : "#7ab5e8",
+            fontFamily: mono, fontSize: 10, letterSpacing: "0.2em",
+            textTransform: "uppercase", transition: "all 0.15s"
+          }}>
+            {running ? "▸ Analizuję..." : "▸ Uruchom analizę"}
+          </button>
+          <button onClick={() => setDeepScan(!deepScan)} style={{
+            padding: "14px 16px", borderRadius: 3, cursor: "pointer",
+            background: deepScan ? "#1a3a20" : "#0c1a28",
+            border: `1px solid ${deepScan ? "#3a7a4a" : "#2a3545"}`,
+            color: deepScan ? "#5ab57a" : "#4a5a6a",
+            fontFamily: mono, fontSize: 9, letterSpacing: "0.12em",
+            textTransform: "uppercase", transition: "all 0.15s", whiteSpace: "nowrap"
+          }} title="Pełna triangulacja z Perplexity i cytowaniem źródeł">
+            {deepScan ? "🔬 RENTGEN ON" : "🔬 RENTGEN"}
+          </button>
+        </div>
 
         {/* Progress */}
         {running && (
@@ -285,7 +461,7 @@ function App() {
             <div style={{ height: 2, background: "#111820" }}>
               <div style={{
                 height: "100%", background: "linear-gradient(90deg, #2a5080, #7ab5e8)",
-                borderRadius: 1, width: `${Math.min(95, elapsed * 4)}%`,
+                borderRadius: 1, width: `${Math.min(95, elapsed * 3)}%`,
                 transition: "width 1s linear"
               }} />
             </div>
@@ -294,7 +470,7 @@ function App() {
               justifyContent: "space-between", alignItems: "center"
             }}>
               <div style={{ fontFamily: mono, fontSize: 10, color: "#5a8aaa", letterSpacing: "0.04em" }}>
-                ▸ Odpytuję modele i tworzę raport...
+                ▸ {currentStage(elapsed)}
               </div>
               <div style={{ fontFamily: mono, fontSize: 10, color: "#4a7ab5" }}>
                 {elapsed}s
@@ -311,21 +487,17 @@ function App() {
             fontFamily: mono, fontSize: 11, marginBottom: 18, lineHeight: 1.6
           }}>
             ✕ {err}
-            {err.includes("fetch") && (
-              <div style={{ marginTop: 6, color: "#8a4040" }}>
-                Backend nie odpowiada. Sprawdź czy serwer działa: uvicorn main:app --reload
-              </div>
-            )}
           </div>
         )}
 
-        {/* Report */}
+        {/* Synth loading (przełączanie trybu) */}
         {synthLoading && (
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#5a8aaa", padding: "10px 0", letterSpacing: "0.04em" }}>
+          <div style={{ fontFamily: mono, fontSize: 10, color: "#5a8aaa", padding: "10px 0", letterSpacing: "0.04em" }}>
             ▸ Generuję drugi tryb...
           </div>
         )}
 
+        {/* Report */}
         {stage === "done" && report && (
           <div>
             <div style={{
@@ -338,22 +510,31 @@ function App() {
                 display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6,
                 marginTop: 20, paddingTop: 14, borderTop: "1px solid #2a3545"
               }}>
-                <Tag c={(() => {
-                  if (verificationData && verificationData.certainty === "SZYBKA") return "1 źródło";
-                  let count = 2;
-                  if (sources && sources.c && !sources.c.startsWith("[GEMINI")) count++;
-                  return `${count} źródła`;
-                })()} />
-                  {verificationData && verificationData.certainty && (
-                    <Tag c={
-                      verificationData.certainty === "SZYBKA" ? "⚡ szybka odpowiedź" :
-                      verificationData.certainty === "POTWIERDZONE ONLINE" ? "✓ potwierdzone online" :
-                      verificationData.certainty === "WYSOKA" ? "✓ zgodne" :
-                      verificationData.certainty === "SREDNIA" ? "⚠ częściowe różnice" :
-                      "✕ modele się różnią"
-                    } accent={verificationData.certainty === "WYSOKA" || verificationData.certainty === "POTWIERDZONE ONLINE"} />
-                  )}
+                <Tag c={`${verificationData.models_count || 0} ${verificationData.models_count === 1 ? "model" : "modele"}`} />
+                {verificationData.certainty && (
+                  <Tag c={certTag.text} color={certTag.color} />
+                )}
+                {cacheHit && <Tag c="⚡ z cache" color="#5a8aaa" />}
                 {timing && <Tag c={`${timing}s`} />}
+                {deepScan && <Tag c="🔬 rentgen" color="#5ab57a" />}
+
+                {requestId && (
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <button onClick={() => sendFeedback(1)} style={{
+                      background: feedback === 1 ? "#1a3a20" : "none",
+                      border: `1px solid ${feedback === 1 ? "#3a7a4a" : "#2a3545"}`,
+                      color: feedback === 1 ? "#5ab57a" : "#4a5a6a",
+                      padding: "3px 8px", borderRadius: 2, cursor: "pointer", fontSize: 12
+                    }}>👍</button>
+                    <button onClick={() => sendFeedback(-1)} style={{
+                      background: feedback === -1 ? "#3a1515" : "none",
+                      border: `1px solid ${feedback === -1 ? "#7a3a3a" : "#2a3545"}`,
+                      color: feedback === -1 ? "#b06060" : "#4a5a6a",
+                      padding: "3px 8px", borderRadius: 2, cursor: "pointer", fontSize: 12
+                    }}>👎</button>
+                  </div>
+                )}
+
                 <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                   <button onClick={() => {
                     const ts = new Date().toLocaleString("pl-PL").replace(/[,:\/\s]/g, "-");
@@ -361,12 +542,18 @@ function App() {
                       ? "\n\n---\nROZMOWA Z ADAMEM\n" + adamHistory.map(m => (m.role === "user" ? "TY: " : "ADAM: ") + m.content).join("\n\n")
                       : "";
                     const src = sources
-                      ? "\n\n---\nCLAUDE:\n" + sources.a + "\n\nGPT-4O-MINI:\n" + sources.b + (sources.c && !sources.c.startsWith("[GEMINI") ? "\n\nGEMINI:\n" + sources.c : "")
+                      ? "\n\n---\nCLAUDE:\n" + sources.a
+                        + "\n\nGPT-4O-MINI:\n" + sources.b
+                        + (sources.c && !sources.c.startsWith("[") ? "\n\nGEMINI:\n" + sources.c : "")
+                        + (sources.p && !sources.p.startsWith("[") ? "\n\nPERPLEXITY:\n" + sources.p : "")
                       : "";
-                    const txt = "PYTANIE: " + q + "\n\n" + report + adamTxt + src;
+                    const cits = citations && citations.length
+                      ? "\n\n---\nŹRÓDŁA PERPLEXITY:\n" + citations.map((c, i) => `[${i+1}] ${c}`).join("\n")
+                      : "";
+                    const txt = "PYTANIE: " + lastQuestion + "\n\n" + report + adamTxt + cits + src;
                     const a = document.createElement("a");
                     a.href = "data:text/plain;charset=utf-8," + encodeURIComponent(txt);
-                    a.download = "silnik_" + ts + ".txt";
+                    a.download = "triangulum_" + ts + ".txt";
                     a.click();
                   }} style={{
                     background: "none", border: "1px solid #2a3a50", color: "#4a7ab5",
@@ -386,14 +573,33 @@ function App() {
               </div>
             </div>
 
+            {/* Citations z Perplexity */}
+            {citations && citations.length > 0 && (
+              <div style={{
+                background: "#131b26", border: "1px solid #2a3545",
+                borderLeft: "2px solid #3a7a4a", borderRadius: 3,
+                padding: "12px 16px", marginTop: 8
+              }}>
+                <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase", color: "#5ab57a", marginBottom: 8 }}>
+                  Źródła (Perplexity)
+                </div>
+                {citations.map((c, i) => (
+                  <div key={i} style={{ fontSize: 11, lineHeight: 1.6, color: "#5a8aaa" }}>
+                    [{i+1}] <a href={c} target="_blank" rel="noopener noreferrer" style={{ color: "#4a7ab5" }}>{c}</a>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Sources */}
             {showSrc && sources && (
-              <div style={{ display: "grid", gridTemplateColumns: `repeat(${[sources.a, sources.b, sources.c && !sources.c.startsWith("[GEMINI")].filter(Boolean).length}, 1fr)`, gap: 8, marginTop: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${[sources.a, sources.b, sources.c && !sources.c.startsWith('['), sources.p && !sources.p.startsWith('[')].filter(Boolean).length || 1}, 1fr)`, gap: 8, marginTop: 10 }}>
                 {[
-                { name: "Claude", text: sources.a },
-                { name: "GPT-4o-mini", text: sources.b },
-                sources.c && !sources.c.startsWith("[GEMINI") ? { name: "Gemini", text: sources.c } : null
-              ].filter(Boolean).map(s => (
+                  sources.a ? { name: "Claude", text: sources.a } : null,
+                  sources.b ? { name: "GPT-4o-mini", text: sources.b } : null,
+                  sources.c && !sources.c.startsWith('[') ? { name: "Gemini", text: sources.c } : null,
+                  sources.p && !sources.p.startsWith('[') ? { name: "Perplexity", text: sources.p } : null
+                ].filter(Boolean).map(s => (
                   <div key={s.name} style={{
                     background: "#131b26", border: "1px solid #2a3545",
                     borderRadius: 3, padding: "13px 14px"
@@ -401,7 +607,7 @@ function App() {
                     <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase", color: "#4a7ab5", marginBottom: 8 }}>
                       {s.name}
                     </div>
-                    <div style={{ fontSize: 11, lineHeight: 1.65, color: "#8090a0" }}>{s.text}</div>
+                    <div style={{ fontSize: 11, lineHeight: 1.65, color: "#8090a0", whiteSpace: "pre-wrap" }}>{s.text}</div>
                   </div>
                 ))}
               </div>
@@ -420,7 +626,7 @@ function App() {
                   <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.2em", textTransform: "uppercase", color: "#7ab5e8" }}>
                     ADAM
                   </div>
-                  <div style={{ fontFamily: mono, fontSize: 9, color: "#4a7ab5", letterSpacing: "0.06em" }}>
+                  <div style={{ fontFamily: mono, fontSize: 9, color: "#2a5070", letterSpacing: "0.06em" }}>
                     pogłęb temat · zapytaj o szczegóły
                   </div>
                 </div>
@@ -442,7 +648,8 @@ function App() {
                           color: msg.role === "user" ? "#a0aab8" : "#c8d4e0",
                           background: msg.role === "user" ? "#2a3a50" : "transparent",
                           padding: msg.role === "user" ? "8px 12px" : "0",
-                          borderRadius: 3
+                          borderRadius: 3,
+                          whiteSpace: "pre-wrap"
                         }}>
                           {msg.content}
                         </div>
@@ -487,10 +694,8 @@ function App() {
                 </div>
               </div>
             </div>
-
           </div>
         )}
-
       </div>
     </div>
   );
