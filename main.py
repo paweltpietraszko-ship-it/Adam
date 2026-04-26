@@ -631,9 +631,21 @@ def ask_gemini(question: str, use_grounding: bool = False) -> ModelResult:
         else:
             config = None
 
+        # Prompt z instrukcja jakosci zrodel — tylko gdy grounding aktywny
+        if use_grounding:
+            grounding_prefix = (
+                "Odpowiadaj tylko na podstawie wiarygodnych zrodel: portale naukowe, rzadowe, "
+                "encyklopedyczne (Wikipedia, Britannica), glowne agencje informacyjne (PAP, Reuters, BBC). "
+                "Ignoruj blogi, fora internetowe, social media, portale plotkarskie i nieweryfikowalne strony. "
+                "Jesli nie znajdziesz wiarygodnego zrodla — powiedz to wprost.\n\n"
+            )
+            contents = grounding_prefix + question
+        else:
+            contents = question
+
         response = gemini_client.models.generate_content(
             model="gemini-flash-latest",
-            contents=question,
+            contents=contents,
             config=config
         )
         text = getattr(response, 'text', None)
@@ -765,7 +777,7 @@ def extract_verification(question: str, a: str, b: str, c: str, pro_mode: bool =
         online_rule = "WSPARTE ZRODLAMI ONLINE = Perplexity podaje konkretne zrodla URL potwierdzajace fakty z co najmniej 1 modelu AI."
     else:
         c_section = f"C (Gemini):\n{c}" if not is_error(c) else ""
-        online_rule = "WSPARTE ZRODLAMI ONLINE = Gemini (z dostepem do internetu) potwierdza fakty z co najmniej 1 modelu AI. Tylko dla pytan o twarde fakty."
+        online_rule = "WSPARTE ZRODLAMI ONLINE = Gemini ma dostep do internetu i podaje konkretne dane. Uzyj tego gdy: Gemini podaje fakty z internetu A pozostale modele deklaruja brak dostepu do aktualnych danych (to NIE jest sprzecznosc — to roznica mozliwosci). Jezeli Gemini jako jedyny podaje dane a inne modele pisza ze nie maja dostepu do internetu — to jest WSPARTE ZRODLAMI ONLINE, nie NISKA."
 
     prompt = f"""Zwroc TYLKO JSON. Zero prozy. Zero komentarzy. Tylko JSON.
 
@@ -785,7 +797,10 @@ WYSOKA = co najmniej 2 modele AI zgodne w kluczowych faktach, brak sprzecznosci
 SREDNIA = 2 modele czesciowo zgodne LUB 1 sprzecznosc w szczegolach
 NISKA = modele roznia sie w kluczowych twierdzeniach LUB bledy/timeouty
 
-KLUCZOWA ZASADA: Jezeli model odpowiada ze nie zna aktualnych danych — jego odpowiedz POMIJASZ przy ocenie pewnosci. Uczciwy brak wiedzy nie jest sprzecznoscia.
+KLUCZOWE ZASADY:
+1. Jezeli model odpowiada ze nie zna aktualnych danych — jego odpowiedz POMIJASZ przy ocenie pewnosci. Uczciwy brak wiedzy nie jest sprzecznoscia.
+2. Jezeli Gemini (C) podaje konkretne dane z internetu, a Claude (A) i GPT (B) pisza ze nie maja dostepu do aktualnych danych — wynik to WSPARTE ZRODLAMI ONLINE. Brak dostepu do internetu to nie sprzecznosc z danymi z internetu.
+3. Szukaj rzeczywistych sprzecznosci — czyli gdy dwa modele PODAJA rozniacze sie fakty. Nie mieszaj "brak danych" z "inne dane".
 
 Schemat:
 {{"certainty":"WSPARTE ZRODLAMI ONLINE|WYSOKA|SREDNIA|NISKA","certainty_reason":"jedno zdanie","facts_aligned":["fakt z co najmniej 2 modeli AI"],"contradictions":[{{"topic":"temat","positions":{{"claude":"stanowisko","gpt":"stanowisko","c":"stanowisko lub brak"}}}}],"uncertain":["teza spekulacyjna"],"models_count":2}}"""
