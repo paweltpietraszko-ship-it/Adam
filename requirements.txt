@@ -4,7 +4,6 @@ openai
 anthropic
 google-genai
 python-dotenv
-tavily-python
 requests
 slowapi
 pymupdf
