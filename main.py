@@ -226,6 +226,7 @@ def init_db():
             citations TEXT,
             verification TEXT,
             synthesis TEXT,
+            falsification TEXT DEFAULT "",
             input_tokens INTEGER DEFAULT 0,
             output_tokens INTEGER DEFAULT 0,
             cost_usd REAL DEFAULT 0
@@ -238,6 +239,7 @@ def init_db():
         ("input_tokens", "INTEGER DEFAULT 0"),
         ("output_tokens", "INTEGER DEFAULT 0"),
         ("cost_usd", "REAL DEFAULT 0"),
+        ("falsification", 'TEXT DEFAULT ""'),
     ]:
         try:
             conn.execute(f"ALTER TABLE requests ADD COLUMN {col} {decl}")
@@ -379,6 +381,7 @@ def save_request(request_id: str, question: str, question_hash: str,
                  has_attachment: bool, mode: str, deep_scan: bool,
                  claude_r: str, openai_r: str, gemini_r: str, perplexity_r: str,
                  citations: list, verification: dict, synthesis: str,
+                 falsification: str = "",
                  input_tokens: int = 0, output_tokens: int = 0,
                  cost_usd: float = 0.0) -> bool:
     try:
@@ -387,15 +390,15 @@ def save_request(request_id: str, question: str, question_hash: str,
             INSERT OR REPLACE INTO requests
             (request_id, timestamp, question, question_hash, has_attachment,
              mode, deep_scan, claude, openai, gemini, perplexity,
-             citations, verification, synthesis,
+             citations, verification, synthesis, falsification,
              input_tokens, output_tokens, cost_usd)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             request_id, now_warsaw_iso(), question, question_hash, int(has_attachment),
             mode, int(deep_scan), claude_r, openai_r, gemini_r, perplexity_r,
             json.dumps(citations, ensure_ascii=False),
             json.dumps(verification, ensure_ascii=False),
-            synthesis,
+            synthesis, falsification,
             input_tokens, output_tokens, cost_usd
         ))
         conn.commit()
@@ -1014,7 +1017,7 @@ KRYTYCZNA ZASADA dla sekcji DLACZEGO TAK:
 Jezeli PEWNOSC = WSPARTE ŹRÓDŁAMI ONLINE lub WYSOKA: opisz TYLKO mechanizm. Zero watpliwosci.
 Jezeli PEWNOSC = SREDNIA lub NISKA: opisz rozne perspektywy uczciwie.{citations_instr}"""
         model = "claude-sonnet-4-6"
-        max_tok = 1500
+        max_tok = 2000
 
     try:
         r = claude_client.messages.create(
@@ -1400,7 +1403,8 @@ def ask(q: Question, request: Request):
                 save_request(request_id, q.question, q_hash, False, q.mode, q.deep_scan,
                              cached["claude"], cached["openai"], cached["gemini"],
                              cached["perplexity"], cached["citations"],
-                             cached["verification"], cached["synthesis"], 0, 0, 0.0)
+                             cached["verification"], cached["synthesis"],
+                             cached.get("falsification", ""), 0, 0, 0.0)
                 cache_set(request_id, cached)
                 return {
                     "request_id": request_id,
@@ -1469,7 +1473,7 @@ def ask(q: Question, request: Request):
             persisted = save_request(
                 request_id, q.question, q_hash, has_attachment, q.mode, True,
                 claude_mr.text, openai_mr.text, "", perplexity_mr.text,
-                perplexity_citations, verif, synth_mr.text,
+                perplexity_citations, verif, synth_mr.text, "",
                 total_in, total_out, total_cost
             )
             add_to_daily_usage(total_in, total_out, total_cost)
@@ -1523,7 +1527,7 @@ def ask(q: Question, request: Request):
             }
             persisted = save_request(
                 request_id, q.question, q_hash, has_attachment, q.mode, False,
-                claude_mr.text, "", "", "", [], verif, synth_mr.text,
+                claude_mr.text, "", "", "", [], verif, synth_mr.text, "",
                 total_in, total_out, total_cost
             )
             add_to_daily_usage(total_in, total_out, total_cost)
@@ -1594,7 +1598,8 @@ def ask(q: Question, request: Request):
             persisted = save_request(
                 request_id, q.question, q_hash, has_attachment, q.mode, False,
                 claude_mr.text, openai_mr.text, gemini_mr.text, "", [],
-                verif, synth_mr.text, total_in, total_out, total_cost
+                verif, synth_mr.text, "",
+                total_in, total_out, total_cost
             )
             add_to_daily_usage(total_in, total_out, total_cost)
             return {
@@ -1629,7 +1634,8 @@ def ask(q: Question, request: Request):
         persisted = save_request(
             request_id, q.question, q_hash, has_attachment, q.mode, False,
             claude_mr.text, openai_mr.text, gemini_mr.text, "", [],
-            verif, synth_mr.text, total_in, total_out, total_cost
+            verif, synth_mr.text, falsification,
+            total_in, total_out, total_cost
         )
         add_to_daily_usage(total_in, total_out, total_cost)
 
