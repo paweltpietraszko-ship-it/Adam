@@ -1017,7 +1017,7 @@ KRYTYCZNA ZASADA dla sekcji DLACZEGO TAK:
 Jezeli PEWNOSC = WSPARTE ŹRÓDŁAMI ONLINE lub WYSOKA: opisz TYLKO mechanizm. Zero watpliwosci.
 Jezeli PEWNOSC = SREDNIA lub NISKA: opisz rozne perspektywy uczciwie.{citations_instr}"""
         model = "claude-sonnet-4-6"
-        max_tok = 2000
+        max_tok = 3000
 
     try:
         r = claude_client.messages.create(
