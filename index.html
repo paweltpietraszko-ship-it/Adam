@@ -119,6 +119,7 @@ function App() {
   const [report, setReport] = useState("");
   const [reportOgolny, setReportOgolny] = useState("");
   const [reportUczen, setReportUczen] = useState("");
+  const [falsification, setFalsification] = useState("");
   const [synthLoading, setSynthLoading] = useState(false);
   const [lastQuestion, setLastQuestion] = useState("");
   const [showSrc, setShowSrc] = useState(false);
@@ -204,7 +205,7 @@ function App() {
 
   async function run() {
     if (!q.trim()) { setErr("Wpisz pytanie."); return; }
-    setErr(""); setSources(null); setReport(""); setReportOgolny(""); setReportUczen("");
+    setErr(""); setSources(null); setReport(""); setReportOgolny(""); setReportUczen(""); setFalsification("");
     setShowSrc(false); setTiming(null); setFeedback(null); setRequestId(null);
     setCitations([]); setCacheHit(false);
     setAdamHistory([]); setAdamInput("");
@@ -246,6 +247,7 @@ function App() {
         p: data.perplexity || ""
       });
       setVerificationData(data.verification || {});
+      setFalsification(data.falsification || "");
       setCitations(data.citations || []);
       setRequestId(data.request_id || null);
       setCacheHit(!!data.cache_hit);
@@ -588,6 +590,22 @@ function App() {
                     [{i+1}] <a href={c} target="_blank" rel="noopener noreferrer" style={{ color: "#4a7ab5" }}>{c}</a>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Falsyfikacja */}
+            {falsification && falsification.length > 0 && mode !== "uczen" && (
+              <div style={{
+                background: "#1a1510", border: "1px solid #3a2a15",
+                borderLeft: "2px solid #b07030", borderRadius: 3,
+                padding: "14px 18px", marginTop: 8
+              }}>
+                <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase", color: "#b07030", marginBottom: 10 }}>
+                  Zastrzeżenia do syntezy
+                </div>
+                <div style={{ fontSize: 13, lineHeight: 1.8, color: "#c0a880", whiteSpace: "pre-wrap" }}>
+                  {falsification}
+                </div>
               </div>
             )}
 
