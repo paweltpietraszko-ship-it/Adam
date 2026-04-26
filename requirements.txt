@@ -7,3 +7,6 @@ python-dotenv
 tavily-python
 requests
 slowapi
+pymupdf
+python-multipart
+tzdata
