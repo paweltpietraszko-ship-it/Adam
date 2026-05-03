@@ -131,6 +131,7 @@ function App() {
   const [uploadLoading, setUploadLoading] = useState(false);
   const [labels, setLabels] = useState(DEFAULT_LABELS);
   const [streamStage, setStreamStage] = useState("");
+  const [cacheHit, setCacheHit] = useState(false);
   const timerRef = useRef(null);
   const adamEndRef = useRef(null);
   const fileInputRef = useRef(null);
