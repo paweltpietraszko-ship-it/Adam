@@ -5,15 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Triangulum</title>
 <!--
-Zmiany vs poprzednia wersja (index-8.html):
-1. BACKEND = window.location.origin — nie trzeba edytować przy zmianie platformy
-2. Etykiety certainty wczytywane z /config — jedno źródło prawdy
-3. Upload: osobne pole attached_text wysyłane do /ask; backend sandboxuje
-4. Progress: fazy symulowane w JS z komunikatami postępu
-5. Tag dla CERT_SINGLE i CERT_QUICK — uczciwsze oznaczenia
-6. Licznik znaków pytania (limit 10000)
-7. Obsługa 429 (budget/rate limit) z czytelnym komunikatem
-8. switchMode: jedna funkcja zamiast dwóch inline handlerów
+Zmiany vs poprzednia wersja (index-17.html):
+1. run() przepisany na SSE streaming — /ask/stream zamiast /ask
+   Synteza pojawia sie token po tokenie, timeout HTTP przestaje byc problemem
+2. Progress bar pokazuje realne etapy z backendu (models/verification/synthesis_chunk)
+   zamiast symulowanego timingu
+3. Wersja: v3.5
 -->
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -56,12 +53,6 @@ const PROGRESS_STAGES = [
   { at: 22, text: "Składam raport..." },
   { at: 40, text: "To trwa dłużej — czekam na ostatnie odpowiedzi..." },
 ];
-
-function currentStage(elapsed) {
-  let s = PROGRESS_STAGES[0].text;
-  for (const p of PROGRESS_STAGES) { if (elapsed >= p.at) s = p.text; }
-  return s;
-}
 
 function certaintyTag(cert, labels) {
   if (!cert) return { text: "brak oceny", color: "#4a5a6a" };
@@ -139,7 +130,7 @@ function App() {
   const [uploadName, setUploadName] = useState("");
   const [uploadLoading, setUploadLoading] = useState(false);
   const [labels, setLabels] = useState(DEFAULT_LABELS);
-  const [cacheHit, setCacheHit] = useState(false);
+  const [streamStage, setStreamStage] = useState("");
   const timerRef = useRef(null);
   const adamEndRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -203,6 +194,19 @@ function App() {
     } catch (e) {}
   }
 
+function currentStage(elapsed, streamStage) {
+  // Jesli mamy realny event z backendu — pokaz go
+  if (streamStage) return streamStage;
+  let s = PROGRESS_STAGES[0].text;
+  for (const p of PROGRESS_STAGES) { if (elapsed >= p.at) s = p.text; }
+  return s;
+}
+    { type: "init",         text: "Inicjuję zapytania..." },
+    { type: "models",       text: "Modele odpowiedziały — weryfikuję..." },
+    { type: "verification", text: "Składam syntezę..." },
+    { type: "synthesis",    text: "Synteza w toku..." },
+  ];
+
   async function run() {
     if (!q.trim()) { setErr("Wpisz pytanie."); return; }
     setErr(""); setSources(null); setReport(""); setReportOgolny(""); setReportUczen(""); setFalsification("");
@@ -210,7 +214,7 @@ function App() {
     setCitations([]); setCacheHit(false);
     setAdamHistory([]); setAdamInput("");
     setStage("loading");
-    const t0 = Date.now();
+    setStreamStage("");
 
     try {
       const body = {
@@ -220,7 +224,7 @@ function App() {
         attached_text: uploadText || null,
         attached_name: uploadName || null,
       };
-      const res = await fetch(`${BACKEND}/ask`, {
+      const res = await fetch(`${BACKEND}/ask/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -228,37 +232,75 @@ function App() {
 
       if (res.status === 429) {
         const data = await res.json().catch(() => ({}));
-        setErr(data.error || "Limit zapytań osiągnięty. Spróbuj później.");
+        setErr(data.error || data.message || "Limit zapytań osiągnięty. Spróbuj później.");
         setStage("error");
         return;
       }
       if (!res.ok) throw new Error(`Błąd serwera: ${res.status}`);
-      const data = await res.json();
 
-      if (data.status === "error" && !data.claude && !data.openai && !data.gemini) {
-        throw new Error(data.error || "Nieznany błąd");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let synthAccum = "";
+      let gotModels = false;
+      let gotVerif = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE moze przyjsc w kawalkach — przetwarzamy pelne linie
+        const lines = buffer.split("\n");
+        buffer = lines.pop(); // ostatnia niepelna linia wraca do bufora
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          let evt;
+          try { evt = JSON.parse(line.slice(6)); } catch { continue; }
+
+          if (evt.type === "models") {
+            gotModels = true;
+            setStreamStage("Modele odpowiedziały — weryfikuję zgodność...");
+            setSources({ a: evt.claude || "", b: evt.openai || "", c: evt.gemini || "", p: evt.perplexity || "" });
+            setCitations(evt.citations || []);
+            setCacheHit(!!evt.cache_hit);
+          }
+
+          if (evt.type === "verification") {
+            gotVerif = true;
+            setStreamStage("Generuję syntezę...");
+            setVerificationData(evt);
+          }
+
+          if (evt.type === "synthesis_chunk") {
+            if (!synthAccum) setStreamStage("Synteza w toku...");
+            synthAccum += evt.text;
+            // Aktualizujemy raport na biezaco — uzytkownik czyta w trakcie generowania
+            setReport(synthAccum);
+            if (mode === "ogolny") setReportOgolny(synthAccum);
+            else setReportUczen(synthAccum);
+          }
+
+          if (evt.type === "done") {
+            setRequestId(evt.request_id || null);
+            setLastQuestion(q);
+            setTiming(((Date.now() - t0) / 1000).toFixed(1));
+            setStage("done");
+          }
+
+          if (evt.type === "error") {
+            throw new Error(evt.message || "Błąd serwera.");
+          }
+        }
       }
-      if (data.status === "error") setErr((data.error || "") + " — wyniki mogą być niepełne.");
 
-      setSources({
-        a: data.claude || "",
-        b: data.openai || "",
-        c: data.gemini || "",
-        p: data.perplexity || ""
-      });
-      setVerificationData(data.verification || {});
-      setFalsification(data.falsification || "");
-      setCitations(data.citations || []);
-      setRequestId(data.request_id || null);
-      setCacheHit(!!data.cache_hit);
-      const og = data.synthesis || "";
-      const uc = data.synthesis_uczen || "";
-      setReportOgolny(og);
-      setReportUczen(uc);
-      setReport(mode === "uczen" ? (uc || og) : (og || uc));
-      setLastQuestion(q);
-      setTiming(((Date.now() - t0) / 1000).toFixed(1));
-      setStage("done");
+      // Jesli stream sie skonczyl bez "done" — i tak mamy dane
+      if (synthAccum && stage !== "done") {
+        setTiming(((Date.now() - t0) / 1000).toFixed(1));
+        setStage("done");
+      }
+
     } catch (e) {
       setErr(e.message);
       setStage("error");
@@ -365,7 +407,7 @@ function App() {
           </div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: 20, fontWeight: 300, color: "#edf2f8", letterSpacing: "-0.02em" }}>
-              <img src="icon-192.png" style={{ width: 22, height: 22, marginRight: 6, verticalAlign: "middle", borderRadius: 4 }} />Triangulum <span style={{ fontWeight: 600, color: "#7ab5e8" }}>v3.3</span>
+              <img src="icon-192.png" style={{ width: 22, height: 22, marginRight: 6, verticalAlign: "middle", borderRadius: 4 }} />Triangulum <span style={{ fontWeight: 600, color: "#7ab5e8" }}>v3.5</span>
             </span>
             <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "#0f1419", padding: 2, borderRadius: 4, border: "1px solid #2a3545" }}>
               <button onClick={() => switchMode("ogolny")}
@@ -472,7 +514,7 @@ function App() {
               justifyContent: "space-between", alignItems: "center"
             }}>
               <div style={{ fontFamily: mono, fontSize: 10, color: "#5a8aaa", letterSpacing: "0.04em" }}>
-                ▸ {currentStage(elapsed)}
+                ▸ {currentStage(elapsed, streamStage)}
               </div>
               <div style={{ fontFamily: mono, fontSize: 10, color: "#4a7ab5" }}>
                 {elapsed}s
