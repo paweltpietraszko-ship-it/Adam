@@ -210,6 +210,7 @@ function currentStage(elapsed, streamStage) {
     setAdamHistory([]); setAdamInput("");
     setStage("loading");
     setStreamStage("");
+    const t0 = Date.now();
 
     try {
       const body = {
