@@ -195,17 +195,11 @@ function App() {
   }
 
 function currentStage(elapsed, streamStage) {
-  // Jesli mamy realny event z backendu — pokaz go
   if (streamStage) return streamStage;
   let s = PROGRESS_STAGES[0].text;
   for (const p of PROGRESS_STAGES) { if (elapsed >= p.at) s = p.text; }
   return s;
 }
-    { type: "init",         text: "Inicjuję zapytania..." },
-    { type: "models",       text: "Modele odpowiedziały — weryfikuję..." },
-    { type: "verification", text: "Składam syntezę..." },
-    { type: "synthesis",    text: "Synteza w toku..." },
-  ];
 
   async function run() {
     if (!q.trim()) { setErr("Wpisz pytanie."); return; }
