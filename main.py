@@ -239,7 +239,7 @@ MAX_DAILY_OUTPUT_TOKENS = int(os.getenv("MAX_DAILY_OUTPUT_TOKENS", "500000"))
 MAX_DAILY_COST_USD = float(os.getenv("MAX_DAILY_COST_USD", "20.0"))
 
 # CORS — precyzyjna whitelist zamiast regex na całej platformie Railway
-_default_origins = "https://adam-production-89ef.up.railway.app,http://localhost:8000,http://127.0.0.1:8000"
+_default_origins = "https://web-production-36d4c.up.railway.app,http://localhost:8000,http://127.0.0.1:8000"
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()]
 
 app.add_middleware(
@@ -2414,6 +2414,67 @@ def ask_stream(q: Question, request: Request):
                 q_type, c_in, c_out, c_cost = classify_question(q.question)
                 total_in += c_in; total_out += c_out; total_cost += c_cost
                 use_grounding = needs_web_search(q.question)
+
+                # ============= SZYBKA SCIEZKA (lustro non-stream /ask) =============
+                if q_type == "proste" and not use_grounding:
+                    claude_mr = ask_claude(composed, system_prompt=_system_prompt_s)
+                    if is_error(claude_mr.text):
+                        claude_mr = ask_openai(composed, system_prompt=_system_prompt_s)
+                    total_in += claude_mr.input_tokens
+                    total_out += claude_mr.output_tokens
+                    total_cost += claude_mr.cost
+
+                    if is_error(claude_mr.text):
+                        yield _sse({"type": "error", "message": "Modele niedostepne. Sprobuj ponownie za chwile."})
+                        return
+
+                    yield _sse({
+                        "type": "models",
+                        "claude": claude_mr.text, "openai": "", "gemini": "", "perplexity": "",
+                        "citations": [], "cache_hit": False,
+                    })
+
+                    verif = {
+                        "certainty": CERT_QUICK,
+                        "certainty_reason": "Proste pytanie — odpowiedz z jednego modelu bez triangulacji.",
+                        "facts_aligned": [], "contradictions": [], "uncertain": [],
+                        "models_count": 1,
+                    }
+                    yield _sse({"type": "verification", **verif})
+
+                    synth_mr = quick_synthesis(q.question, claude_mr.text, q.mode)
+                    total_in += synth_mr.input_tokens
+                    total_out += synth_mr.output_tokens
+                    total_cost += synth_mr.cost
+                    yield _sse({"type": "synthesis_chunk", "text": synth_mr.text})
+
+                    persisted = save_request(
+                        request_id, q.question, q_hash, has_attachment, q.mode, False,
+                        claude_mr.text, "", "", "", [], verif, synth_mr.text, "",
+                        total_in, total_out, total_cost
+                    )
+                    add_to_daily_usage(total_in, total_out, total_cost)
+                    cache_set(request_id, {
+                        "question":     q.question,
+                        "claude":       claude_mr.text,
+                        "openai":       "",
+                        "gemini":       "",
+                        "perplexity":   "",
+                        "citations":    [],
+                        "verification": verif,
+                        "synthesis":    synth_mr.text,
+                    })
+                    yield _sse({
+                        "type":       "done",
+                        "falsification": "",
+                        "request_id": request_id,
+                        "persisted":  persisted,
+                        "cost":       round(total_cost, 4),
+                        "deep_scan":  False,
+                        "mode":       q.mode,
+                    })
+                    return
+
                 composed_with_sources = add_source_instruction(composed)
                 parallel = run_models_parallel(
                     tasks={
@@ -2451,6 +2512,50 @@ def ask_stream(q: Question, request: Request):
 
             if working_count == 0:
                 yield _sse({"type": "error", "message": "Wszystkie modele niedostepne. Sprobuj ponownie za chwile."})
+                return
+
+            # Tylko 1 model odpowiedzial (triangulacja, nie deep_scan) — spadamy do
+            # uczciwej etykiety CERT_SINGLE zamiast pozorowac weryfikacje. Lustrzane
+            # zachowanie wzgledem non-stream /ask.
+            if not q.deep_scan and working_count == 1:
+                _only_mr = next(mr for mr in (claude_mr, openai_mr, gemini_mr) if not is_error(mr.text))
+                verif = {
+                    "certainty": CERT_SINGLE,
+                    "certainty_reason": "Tylko 1 model odpowiedzial w czasie — brak bazy do triangulacji.",
+                    "facts_aligned": [], "contradictions": [], "uncertain": [],
+                    "models_count": 1,
+                }
+                yield _sse({"type": "verification", **verif})
+                synth_mr = quick_synthesis(q.question, _only_mr.text, q.mode)
+                total_in += synth_mr.input_tokens
+                total_out += synth_mr.output_tokens
+                total_cost += synth_mr.cost
+                yield _sse({"type": "synthesis_chunk", "text": synth_mr.text})
+                persisted = save_request(
+                    request_id, q.question, q_hash, has_attachment, q.mode, False,
+                    claude_mr.text, openai_mr.text, gemini_mr.text, "", [],
+                    verif, synth_mr.text, "", total_in, total_out, total_cost
+                )
+                add_to_daily_usage(total_in, total_out, total_cost)
+                cache_set(request_id, {
+                    "question":     q.question,
+                    "claude":       claude_mr.text,
+                    "openai":       openai_mr.text,
+                    "gemini":       gemini_mr.text,
+                    "perplexity":   "",
+                    "citations":    [],
+                    "verification": verif,
+                    "synthesis":    synth_mr.text,
+                })
+                yield _sse({
+                    "type":       "done",
+                    "falsification": "",
+                    "request_id": request_id,
+                    "persisted":  persisted,
+                    "cost":       round(total_cost, 4),
+                    "deep_scan":  False,
+                    "mode":       q.mode,
+                })
                 return
 
             total_models = 3 if not q.deep_scan else 3
