@@ -290,7 +290,13 @@ claude_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"), timeout=120.0)
 gemini_api_key = os.getenv("GEMINI_API_KEY")
 perplexity_api_key = os.getenv("PERPLEXITY_API_KEY")
 
-gemini_client = google_genai.Client(api_key=gemini_api_key) if gemini_api_key else None
+# http_options timeout: znane buggi w SDK czasem go ignorują (SDK nadpisuje na None
+# wewnętrznie w niektórych ścieżkach) — to zabezpieczenie dodatkowe, nie jedyne.
+# Realny limit czasu na Gemini w triangulacji pilnuje run_models_parallel (patrz timeouts=).
+gemini_client = google_genai.Client(
+    api_key=gemini_api_key,
+    http_options=genai_types.HttpOptions(timeout=45000) if genai_types else None,
+) if gemini_api_key else None
 perplexity_client = OpenAI(
     api_key=perplexity_api_key,
     base_url="https://api.perplexity.ai",
@@ -2138,7 +2144,7 @@ def ask(q: Question, request: Request):
                 "openai": (ask_openai, (composed_with_sources,), {"system_prompt": _system_prompt}),
                 "gemini": (ask_gemini, (composed, False), {"system_prompt": SYSTEM_PROMPT_GENERAL}),  # grounding wyłączony — Brave zastępuje
             },
-            timeouts={"claude": 50, "openai": 30, "gemini": 30},
+            timeouts={"claude": 50, "openai": 30, "gemini": 45},
         )
         claude_mr = parallel["claude"]
         openai_mr = parallel["openai"]
@@ -2482,7 +2488,7 @@ def ask_stream(q: Question, request: Request):
                         "openai": (ask_openai,  (composed_with_sources,), {"system_prompt": _system_prompt_s}),
                         "gemini": (ask_gemini,  (composed, _use_grounding_s), {"system_prompt": _system_prompt_gemini_s}),
                     },
-                    timeouts={"claude": 50, "openai": 30, "gemini": 30},
+                    timeouts={"claude": 50, "openai": 30, "gemini": 45},
                 )
                 claude_mr   = parallel["claude"]
                 openai_mr   = parallel["openai"]
