@@ -98,6 +98,26 @@ def _extract_keywords(question: str) -> str:
     return " ".join(words[:15])
 
 
+# Słowa wskazujące że pytanie chce danych z DOSŁOWNIE dzisiaj/teraz — dla takich
+# freshness="py" (domyślne, cały rok) zwraca stare wyniki zamiast aktualnych.
+_TIME_SENSITIVE_RE = re.compile(
+    r'\b(dzisiaj|dzis|dziś|teraz|aktualn\w*|obecnie|bieżąc\w*|biezac\w*|'
+    r'w tym tygodniu|na dziś|na dzis|live|na żywo|na zywo)\b',
+    re.IGNORECASE
+)
+
+
+def _pick_freshness(question: str) -> str:
+    """
+    Dobiera okno świeżości Brave do pytania.
+    'dzisiaj/teraz/aktualny' => pd (past day) — inaczej dostajemy trafienia
+    sprzed tygodni mimo pytania o 'dzisiaj' (freshness=py przeszukuje caly rok).
+    Reszta => pw (past week) — rozsądniejszy domyślny niż cały rok dla
+    sekcji jawnie nazwanej 'AKTUALNY KONTEKST Z INTERNETU'.
+    """
+    return "pd" if _TIME_SENSITIVE_RE.search(question) else "pw"
+
+
 # ============================================================
 # Relevance scoring
 # ============================================================
@@ -182,7 +202,8 @@ def get_web_context(question: str) -> Optional[str]:
         logger.debug(f"[BRAVE] Za mało słów kluczowych: '{keywords_str}'")
         return None
 
-    logger.info(f"[BRAVE] Szukam: '{keywords_str[:80]}'")
+    freshness = _pick_freshness(question)
+    logger.info(f"[BRAVE] Szukam: '{keywords_str[:80]}' (freshness={freshness})")
 
     try:
         params = urllib.parse.urlencode({
@@ -190,7 +211,7 @@ def get_web_context(question: str) -> Optional[str]:
             "count":         BRAVE_FETCH_N,
             "country":       "PL",
             "search_lang":   "pl",
-            "freshness":     "py",
+            "freshness":     freshness,
             "result_filter": "web",
             "extra_snippets": "true",
         })
