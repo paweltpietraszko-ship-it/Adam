@@ -6,6 +6,3 @@ google-genai
 python-dotenv
 requests
 slowapi
-pymupdf
-python-multipart
-tzdata

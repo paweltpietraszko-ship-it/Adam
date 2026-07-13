@@ -282,6 +282,7 @@ function currentStage(elapsed, streamStage) {
             setRequestId(evt.request_id || null);
             setLastQuestion(q);
             setTiming(((Date.now() - t0) / 1000).toFixed(1));
+            setFalsification(evt.falsification || "");
             setStage("done");
           }
 
