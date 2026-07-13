@@ -127,6 +127,7 @@ import os
 import re
 import json
 import uuid
+import random
 import sqlite3
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
@@ -1356,8 +1357,28 @@ Użyj nagłówków: **ODPOWIEDŹ Z JEDNEGO MODELU** i **GDZIE SĄ GRANICE**"""
         return ModelResult(answer)
 
 
-def render_synthesis(question: str, verification: dict, mode: str,
-                     citations: list = None) -> ModelResult:
+def _build_synthesis_prompt(question: str, verification: dict, mode: str,
+                            citations: list = None,
+                            claude_answer: str = None, openai_answer: str = None,
+                            gemini_answer: str = None) -> tuple:
+    """
+    Buduje prompt syntezy. Wspolna logika dla render_synthesis (non-stream)
+    i /ask/stream (ktory strumieniuje token-po-tokenie, wiec nie moze wolac
+    render_synthesis wprost, ale musi uzywac dokladnie tego samego promptu).
+
+    Zwraca (prompt, model, max_tokens).
+
+    Gdy podane sa wszystkie trzy surowe odpowiedzi modeli i mode != "uczen":
+    tryb RAPORTU z oslepionymi etykietami A/B/C zamiast nazw modeli (Claude,
+    GPT, Gemini) — zeby Sonnet nie faworyzowal odpowiedzi wlasnej rodziny
+    (self-preference bias, znane zjawisko w LLM-as-judge). Etykiety A/B/C
+    sa losowane przy kazdym wywolaniu — Sonnet nigdy nie wie ktora jest jego.
+    Celowo NIE podstawiamy nazw z powrotem w tekscie wynikowym: w streamie
+    uzytkownik i tak zobaczylby "Odpowiedz A" zanim zdazylibysmy je podmienic,
+    wiec podstawienie tylko po fakcie tworzyloby niespojnosc. Surowe odpowiedzi
+    kazdego modelu i tak sa pokazywane osobno (event "models"), wiec przypisanie
+    nie ginie dla uzytkownika.
+    """
     if not verification:
         verification = {
             "certainty": CERT_LOW,
@@ -1407,10 +1428,54 @@ Zasady:
 KRYTYCZNA ZASADA:
 Jezeli PEWNOSC = WSPARTE ŹRÓDŁAMI ONLINE lub WYSOKA: opisz TYLKO jak to dziala. Zero watpliwosci.
 Jezeli PEWNOSC = SREDNIA lub NISKA: mozesz powiedziec ze nie wszyscy sie zgadzaja.{citations_instr}"""
-        model = "claude-haiku-4-5-20251001"
-        max_tok = 800
-    else:
-        prompt = f"""Masz wynik weryfikacji {models_count} modeli AI na pytanie: {question}
+        return prompt, "claude-haiku-4-5-20251001", 800
+
+    if claude_answer is not None and openai_answer is not None and gemini_answer is not None:
+        raw = {"claude": claude_answer, "openai": openai_answer, "gemini": gemini_answer}
+        labels = ["A", "B", "C"]
+        keys = list(raw.keys())
+        random.shuffle(keys)
+        label_map = dict(zip(labels, keys))
+        answers_block = "\n\n".join(
+            f"ODPOWIEDŹ {lab}:\n{raw[label_map[lab]]}" for lab in labels
+        )
+        prompt = f"""Masz trzy niezalezne odpowiedzi modeli AI na pytanie: {question}
+
+{answers_block}
+
+WSTEPNA WERYFIKACJA: PEWNOSC: {cert} — {reason}. FAKTY ZGODNE: {facts}. SPRZECZNOSCI: {contras}.
+
+Napisz RAPORT, nie podsumowanie-do-odhaczenia. NIE usredniaj roznic miedzy odpowiedziami —
+mniejszosc moze miec racje, nie odrzucaj jej automatycznie. Nie zakladaj z gory, ktora
+odpowiedz jest "twoja" — identyfikatory A/B/C sa losowe, oceniaj wylacznie tresc.
+
+Dlugosc dopasuj do tematu, nie do wygody czytelnika: proste sprzecznosci rozstrzygnij
+krotko i przejdz dalej. Tematy wieloczynnikowe (historia, sprzeczne interesy stron,
+kontekst polityczny/spoleczny) opisz z pelnymi niuansami — skracanie ich kosztem tresci
+jest gorsze niz dluga, precyzyjna odpowiedz. Nie licz sie z liczba tokenow.
+
+Odwoluj sie do odpowiedzi wylacznie jako "Odpowiedz A", "Odpowiedz B", "Odpowiedz C" —
+NIGDY nie zgaduj ani nie ujawniaj ktory model to napisal.
+
+Uzyj tych naglowkow (rozwijaj kazdy tyle, ile temat wymaga):
+
+**WERDYKT** — ktora odpowiedz/kombinacja jest najbardziej wiarygodna i dlaczego
+
+**ZGODNE FAKTY** — co potwierdzily niezaleznie 2+ odpowiedzi
+
+**SPORNE PUNKTY** — gdzie sie roznia, ktora strona wyglada sluszniej i NA CZYM
+opierasz te ocene (mechanizm, zrodlo, wewnetrzna niespojnosc) — jesli temat ma wiele
+warstw sporu, opisz kazda osobno, nie splaszczaj do jednego zdania
+
+**PODEJRZENIE HALUCYNACJI** — konkretne twierdzenia + ktora odpowiedz (A/B/C); "brak podejrzen" jesli nic nie budzi watpliwosci
+
+**GRANICE** — czego zadna odpowiedz nie wie na pewno, gdzie potrzebna dalsza weryfikacja
+
+Zakaz: nie skracaj zlozonego tematu do listy punktow zeby "zmiescic sie" w jakims rozmiarze —
+rozmiaru nie ma. Jedyny zakaz to lanie wody — kazde zdanie ma niesc informacje.{citations_instr}"""
+        return prompt, "claude-sonnet-4-6", 4000
+
+    prompt = f"""Masz wynik weryfikacji {models_count} modeli AI na pytanie: {question}
 
 PEWNOSC: {cert} — {reason}
 FAKTY ZGODNE: {facts}
@@ -1452,9 +1517,17 @@ Uzyj tych naglowkow:
 KRYTYCZNA ZASADA dla sekcji DLACZEGO TAK:
 Jezeli PEWNOSC = WSPARTE ŹRÓDŁAMI ONLINE lub WYSOKA: opisz TYLKO mechanizm. Zero watpliwosci.
 Jezeli PEWNOSC = SREDNIA lub NISKA: mozesz opisac roznice i niepewnosci.{citations_instr}"""
-        model = "claude-sonnet-4-6"
-        max_tok = 3000
+    return prompt, "claude-sonnet-4-6", 3000
 
+
+def render_synthesis(question: str, verification: dict, mode: str,
+                     citations: list = None,
+                     claude_answer: str = None, openai_answer: str = None,
+                     gemini_answer: str = None) -> ModelResult:
+    prompt, model, max_tok = _build_synthesis_prompt(
+        question, verification, mode, citations,
+        claude_answer, openai_answer, gemini_answer
+    )
     try:
         r = claude_client.messages.create(
             model=model, max_tokens=max_tok,
@@ -2213,7 +2286,10 @@ def ask(q: Question, request: Request):
         # Uczciwe oznaczenie gdy ktoś padł (np. 2/3)
         verif = annotate_partial(verif, len(working), 3)
 
-        synth_mr = render_synthesis(q.question, verif, q.mode)
+        synth_mr = render_synthesis(
+            q.question, verif, q.mode,
+            claude_answer=claude_mr.text, openai_answer=openai_mr.text, gemini_answer=gemini_mr.text
+        )
         total_in += synth_mr.input_tokens
         total_out += synth_mr.output_tokens
         total_cost += synth_mr.cost
@@ -2576,44 +2652,14 @@ def ask_stream(q: Question, request: Request):
 
             yield _sse({"type": "verification", **verif})
 
-            # Budujemy prompt syntezy (ta sama logika co render_synthesis)
-            cert        = verif.get("certainty", CERT_LOW)
-            reason      = verif.get("certainty_reason", "")
-            facts       = verif.get("facts_aligned", [])
-            contras     = verif.get("contradictions", [])
-            uncertain   = verif.get("uncertain", [])
-            models_count = verif.get("models_count", 0)
-            cert_label  = CERT_LABELS.get(cert, CERT_LABELS[CERT_LOW])
-
-            citations_section = ""
-            citations_instr   = ""
-            if citations:
-                numbered = "\n".join(f"[{i+1}] {c}" for i, c in enumerate(citations[:10]))
-                citations_section = f"\nZRODLA PERPLEXITY (ponumerowane):\n{numbered}"
-                citations_instr = ("\n\nWAZNE: W sekcji TWARDE FAKTY cytuj zrodla uzywajac numerow [1], [2] "
-                                   "tak jak ponizej. Uzywaj tylko tych numerow ktore sa na liscie.")
-
-            if q.mode == "uczen":
-                synth_prompt = (
-                    f"Masz wynik weryfikacji {models_count} modeli AI na pytanie: {q.question}\n\n"
-                    f"PEWNOSC: {cert} — {reason}\nFAKTY ZGODNE: {facts}\n"
-                    f"SPRZECZNOSCI: {contras}\nNIEPEWNE: {uncertain}\nOCENA: {cert_label}{citations_section}\n\n"
-                    "Napisz odpowiedz dla ucznia. Bez naglowkow markdown. Tylko ciagly tekst, max 4 akapity."
-                    f"{citations_instr}"
-                )
-                synth_model   = "claude-haiku-4-5-20251001"
-                synth_max_tok = 800
-            else:
-                synth_prompt = (
-                    f"Masz wynik weryfikacji {models_count} modeli AI na pytanie: {q.question}\n\n"
-                    f"PEWNOSC: {cert} — {reason}\nFAKTY ZGODNE: {facts}\n"
-                    f"SPRZECZNOSCI: {contras}\nNIEPEWNE: {uncertain}\nOCENA: {cert_label}{citations_section}\n\n"
-                    "Napisz odpowiedz dla doroslego. Uzyj naglowkow: **SYNTEZA**, **CO Z TEGO WYNIKA**, "
-                    "**DLACZEGO TAK**, **TWARDE FAKTY**, **CO WIEMY A CZEGO NIE**, **GDZIE SA GRANICE**."
-                    f"{citations_instr}"
-                )
-                synth_model   = "claude-sonnet-4-6"
-                synth_max_tok = 3000
+            # Budujemy prompt syntezy — dokladnie ta sama funkcja co render_synthesis
+            # (non-stream), zeby oba pipeline'y nigdy nie rozjechaly sie w tresci promptu.
+            synth_prompt, synth_model, synth_max_tok = _build_synthesis_prompt(
+                q.question, verif, q.mode, citations=citations,
+                claude_answer=claude_mr.text if not q.deep_scan else None,
+                openai_answer=openai_mr.text if not q.deep_scan else None,
+                gemini_answer=gemini_mr.text if not q.deep_scan else None,
+            )
 
             # Streaming syntezy — tokeny ida na biezaco
             synthesis_text = ""
@@ -2712,7 +2758,12 @@ def resynthesize(req: ResynthesizeRequest, request: Request):
         if cert == CERT_QUICK:
             mr = quick_synthesis(cached["question"], cached.get("claude", ""), req.mode)
         else:
-            mr = render_synthesis(cached["question"], verif, req.mode, citations=citations)
+            _c, _o, _g = cached.get("claude", ""), cached.get("openai", ""), cached.get("gemini", "")
+            if _c and _o and _g:
+                mr = render_synthesis(cached["question"], verif, req.mode, citations=citations,
+                                      claude_answer=_c, openai_answer=_o, gemini_answer=_g)
+            else:
+                mr = render_synthesis(cached["question"], verif, req.mode, citations=citations)
         add_to_daily_usage(mr.input_tokens, mr.output_tokens, mr.cost)
         return {
             "synthesis": mr.text,
